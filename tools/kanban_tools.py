@@ -991,7 +991,7 @@ def _handle_create(args: dict, **kw) -> str:
                 assignee=str(assignee),
                 parents=tuple(parents),
                 tenant=tenant,
-                priority=int(priority) if priority is not None else 0,
+                priority=int(priority) if priority is not None else None,
                 workspace_kind=str(workspace_kind),
                 workspace_path=workspace_path,
                 project_id=project_id,
