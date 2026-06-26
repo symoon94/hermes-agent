@@ -3111,6 +3111,8 @@
     const [uploadBusy, setUploadBusy] = useState(false);
     const [uploadErr, setUploadErr] = useState(null);
     const [editing, setEditing] = useState(false);
+    const [fullscreen, setFullscreen] = useState(false);
+    const bodyRef = useRef(null);
     // Home-channel notification toggles. homeChannels is the list of platforms
     // the user has a /sethome on; each entry has a `subscribed` bool telling
     // us whether this task is currently subscribed via that platform's home.
@@ -3334,6 +3336,17 @@
         .catch(function (e) { setErr(String(e.message || e)); });
     };
 
+    const scrollDrawer = function (target) {
+      const el = bodyRef.current;
+      if (!el) return;
+      const top = target === "bottom" ? el.scrollHeight : 0;
+      try {
+        el.scrollTo({ top: top, behavior: "smooth" });
+      } catch (_e) {
+        el.scrollTop = top;
+      }
+    };
+
     const toggleHomeSubscription = function (platform, currentlySubscribed) {
       // Optimistic flip + busy flag to keep double-clicks idempotent.
       setHomeBusy(function (b) { return Object.assign({}, b, { [platform]: true }); });
@@ -3373,23 +3386,44 @@
 
     return h("div", { className: "hermes-kanban-drawer-shade", onClick: props.onClose },
       h("div", {
-        className: "hermes-kanban-drawer",
+        className: cn("hermes-kanban-drawer", fullscreen ? "hermes-kanban-drawer--fullscreen" : ""),
         onClick: function (e) { e.stopPropagation(); },
       },
         h("div", { className: "hermes-kanban-drawer-head" },
           h("span", { className: "text-xs text-muted-foreground" }, props.taskId),
-          h("button", {
-            type: "button",
-            onClick: props.onClose,
-            className: "hermes-kanban-drawer-close",
-            title: tx(t, "close", "Close (Esc)"),
-          }, "×"),
+          h("div", { className: "hermes-kanban-drawer-head-actions" },
+            h("button", {
+              type: "button",
+              onClick: function () { scrollDrawer("top"); },
+              className: "hermes-kanban-drawer-nav",
+              title: "Jump to top",
+            }, "↑ Top"),
+            h("button", {
+              type: "button",
+              onClick: function () { scrollDrawer("bottom"); },
+              className: "hermes-kanban-drawer-nav",
+              title: "Jump to bottom / comments",
+            }, "↓ Bottom"),
+            h("button", {
+              type: "button",
+              onClick: function () { setFullscreen(function (v) { return !v; }); },
+              className: "hermes-kanban-drawer-nav",
+              title: fullscreen ? "Exit full screen detail" : "Open full screen detail",
+            }, fullscreen ? "↘ Exit" : "⛶ Full"),
+            h("button", {
+              type: "button",
+              onClick: props.onClose,
+              className: "hermes-kanban-drawer-close",
+              title: tx(t, "close", "Close (Esc)"),
+            }, "×"),
+          ),
         ),
         loading ? h("div", { className: "p-4 text-sm text-muted-foreground" },
           tx(t, "loadingDetail", "Loading…")) :
         err ? h("div", { className: "p-4 text-sm text-destructive" }, err) :
         data ? h(TaskDetail, {
           data, editing, setEditing,
+          bodyRef: bodyRef,
           renderMarkdown: props.renderMarkdown,
           allTasks: props.allTasks,
           assignees: props.assignees || [],
@@ -3681,7 +3715,7 @@
     const attachments = props.data.attachments || [];
     const links = props.data.links || { parents: [], children: [] };
 
-    return h("div", { className: "hermes-kanban-drawer-body" },
+    return h("div", { className: "hermes-kanban-drawer-body", ref: props.bodyRef },
       h("div", { className: "hermes-kanban-drawer-title" },
         h("span", { className: cn("hermes-kanban-dot", COLUMN_DOT[t.status]) }),
         props.editing

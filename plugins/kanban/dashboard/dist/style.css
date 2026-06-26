@@ -603,6 +603,51 @@
 }
 .hermes-kanban-drawer-close:hover { color: var(--color-foreground); }
 
+
+.hermes-kanban-drawer--fullscreen {
+  width: min(1180px, 96vw);
+}
+
+.hermes-kanban-drawer-head-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.hermes-kanban-drawer-nav {
+  appearance: none;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-background) 55%, transparent);
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  font-size: 0.72rem;
+  line-height: 1;
+  padding: 0.28rem 0.55rem;
+  white-space: nowrap;
+}
+.hermes-kanban-drawer-nav:hover {
+  border-color: var(--color-ring);
+  color: var(--color-foreground);
+  background: color-mix(in srgb, var(--color-ring) 9%, var(--color-card));
+}
+
+@media (max-width: 640px) {
+  .hermes-kanban-drawer-head {
+    gap: 0.5rem;
+  }
+  .hermes-kanban-drawer-head-actions {
+    gap: 0.25rem;
+  }
+  .hermes-kanban-drawer-nav {
+    font-size: 0.66rem;
+    padding: 0.24rem 0.4rem;
+  }
+}
+
+
 /* Attachment download trigger — styled as a link, rendered as a <button>
    so the click handler can fetch with the session token (#35338). */
 .hermes-kanban-attachment-link {
