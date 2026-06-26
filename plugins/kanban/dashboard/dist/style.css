@@ -1953,3 +1953,26 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.hermes-kanban-action-help {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0.75rem 0 0.6rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, var(--color-muted) 22%, transparent);
+  color: var(--color-muted-foreground);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+.hermes-kanban-action-help strong {
+  color: var(--color-foreground);
+}
+.hermes-kanban-action-help code {
+  font-size: 0.72rem;
+  color: var(--color-foreground);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 0.05rem 0.35rem;
+}

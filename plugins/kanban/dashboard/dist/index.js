@@ -4416,7 +4416,7 @@
           },
           disabled: specifyBusy,
           size: "sm",
-        }, specifyBusy ? "Specifying…" : "✨ Specify")
+        }, specifyBusy ? "Refining…" : "✨ Ask AI to refine spec")
       : null;
 
     const teamButton = (task.status === "triage" && props.onAssembleTeam)
@@ -4437,7 +4437,7 @@
           },
           disabled: teamBusy,
           size: "sm",
-        }, teamBusy ? "Assembling…" : "👥 Assemble team")
+        }, teamBusy ? "Planning…" : "👥 Plan AI team")
       : null;
 
     // "Decompose" is the built-in decomposer fan-out. Like Specify, only
@@ -4484,26 +4484,35 @@
           },
           disabled: decomposeBusy,
           size: "sm",
-        }, decomposeBusy ? "Decomposing…" : "⚗ Decompose")
+        }, decomposeBusy ? "Splitting…" : "⚗ Split into subtasks")
       : null;
 
     return h("div", null,
+      h("div", { className: "hermes-kanban-action-help" },
+        h("div", null, h("strong", null, "Want to inspect it yourself? "),
+          "Use ", h("code", null, "Human review"), " — AI will not start it."),
+        h("div", null, h("strong", null, "Want AI to execute? "),
+          "Use ", h("code", null, "Start AI work"), " — this moves it to the dispatch queue."),
+        h("div", null, h("strong", null, "Added a comment and want LLM to re-check? "),
+          "Use ", h("code", null, "Ask AI to refine spec"), " while in triage."),
+      ),
       h("div", { className: "hermes-kanban-actions" },
         specifyButton,
         teamButton,
         decomposeButton,
-        b("→ triage",  { status: "triage" },   task.status !== "triage"),
-        b("→ ready",   { status: "ready" },    task.status !== "ready"),
+        b("← Back to triage",  { status: "triage" },   task.status !== "triage"),
+        b("👀 Human review",   { status: "review" },   task.status !== "review"),
+        b("▶ Start AI work",   { status: "ready" },    task.status !== "ready"),
         // No direct → running button: /tasks/:id PATCH rejects status=running
         // with 400 (issue #19535). Tasks enter running only through the
         // dispatcher's claim_task path, which atomically creates the run row,
         // claim lock, and worker process metadata.
-        b(tx(t, "block", "Block"),     { status: "blocked" },
-          task.status === "running" || task.status === "ready",
+        b(tx(t, "block", "Wait / blocked"),     { status: "blocked" },
+          task.status === "running" || task.status === "ready" || task.status === "review",
           getDestructiveConfirm(t, "blocked")),
-        b(tx(t, "unblock", "Unblock"),   { status: "ready" },    task.status === "blocked"),
+        b(tx(t, "unblock", "Unblock → Start AI work"),   { status: "ready" },    task.status === "blocked"),
         b(tx(t, "complete", "Complete"),  { status: "done" },
-          task.status === "running" || task.status === "ready" || task.status === "blocked",
+          task.status === "running" || task.status === "ready" || task.status === "blocked" || task.status === "review",
           getDestructiveConfirm(t, "done")),
         b(tx(t, "archive", "Archive"),   { status: "archived" }, task.status !== "archived",
           getDestructiveConfirm(t, "archived")),
