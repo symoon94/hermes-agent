@@ -40,7 +40,7 @@ from typing import Optional
 
 from hermes_cli import kanban_db as kb
 
-from utils import env_int
+from utils import env_int, is_truthy_value
 
 HERMES_KANBAN_SPECIFY_MAX_TOKENS = max(
     1500,
@@ -76,6 +76,8 @@ Rules:
     NOT invent a different project.
   - If the original idea is already detailed, preserve its substance and
     just reformat into the sections above.
+  - Treat any CLARIFY_ANSWER entries in the clarify transcript as
+    authoritative human decisions. Do not override them with guesses.
   - Never add invented requirements the user didn't hint at.
   - No preamble, no closing remarks, no code fences around the JSON.
   - Output only the JSON object and nothing else.
@@ -86,6 +88,9 @@ _USER_TEMPLATE = """Task id: {task_id}
 Current title: {title}
 Current body:
 {body}
+
+Clarify transcript:
+{clarify_transcript}
 """
 
 
@@ -139,6 +144,15 @@ def _profile_author() -> str:
     )
 
 
+def _clarify_transcript(comments: list[kb.Comment]) -> str:
+    """Return the Luna-style clarify transcript stored in task comments."""
+    try:
+        from hermes_cli import kanban_clarify
+    except Exception:
+        return "(none yet)"
+    return kanban_clarify.clarify_transcript(comments)
+
+
 def specify_task(
     task_id: str,
     *,
@@ -154,6 +168,7 @@ def specify_task(
     """
     with kb.connect_closing() as conn:
         task = kb.get_task(conn, task_id)
+        comments = kb.list_comments(conn, task_id) if task is not None else []
     if task is None:
         return SpecifyOutcome(task_id, False, "unknown task id")
     if task.status != "triage":
@@ -182,20 +197,25 @@ def specify_task(
         task_id=task.id,
         title=_truncate(task.title or "", 400),
         body=_truncate(task.body or "(no body)", 4000),
+        clarify_transcript=_truncate(_clarify_transcript(comments), 5000),
     )
 
     try:
-        resp = client.chat.completions.create(
+        _create_kwargs = dict(
             model=model,
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": user_msg},
             ],
-            temperature=0.3,
             max_tokens=HERMES_KANBAN_SPECIFY_MAX_TOKENS,
             timeout=timeout or 120,
             extra_body=get_auxiliary_extra_body() or None,
         )
+        # Some routers (e.g. Timely w/ claude-opus-4-8) reject `temperature`
+        # as deprecated. Allow opting out via HERMES_AUX_NO_TEMPERATURE=1.
+        if not is_truthy_value(os.getenv("HERMES_AUX_NO_TEMPERATURE", "")):
+            _create_kwargs["temperature"] = 0.3
+        resp = client.chat.completions.create(**_create_kwargs)
     except Exception as exc:
         logger.info(
             "specify: API call failed for %s (%s) — skipping",

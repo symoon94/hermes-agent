@@ -45,6 +45,7 @@ from typing import Optional
 
 from hermes_cli import kanban_db as kb
 from hermes_cli import profiles as profiles_mod
+from utils import is_truthy_value
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,7 @@ matching profile from the available roster.
 
 You will be given:
   - The original task title and body
+  - Any TEAM_ASSEMBLY plan produced by the team assembler
   - The list of available profiles (each with name + description)
   - The fallback "default_assignee" used when no profile fits
 
@@ -84,6 +86,9 @@ Rules:
     them no parents so the dispatcher fans them out at once.
   - Use 2-6 tasks for normal work. Don't create 20 tiny tasks. Don't
     cram everything into 1 task.
+  - If a TEAM_ASSEMBLY plan is present, preserve its role/responsibility/
+    handoff intent when creating child tasks. Treat it as planning guidance,
+    not as a requirement to fan out if the task is genuinely solo.
   - Pick assignees from the roster by matching the task to the profile's
     DESCRIPTION (not just the name). When nothing matches well, use null
     and the system will route to the default_assignee.
@@ -113,6 +118,9 @@ _USER_TEMPLATE = """Task id: {task_id}
 Title: {title}
 Body:
 {body}
+
+Team assembly plan:
+{team_assembly}
 
 Available profiles (assignees you may pick from):
 {roster}
@@ -249,6 +257,14 @@ def _format_roster(roster: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _team_assembly_transcript(comments: list[kb.Comment]) -> str:
+    try:
+        from hermes_cli import kanban_team
+    except Exception:
+        return "(none yet)"
+    return kanban_team.team_transcript(comments)
+
+
 def _normalize_assignee_choice(
     assignee: object,
     *,
@@ -283,6 +299,7 @@ def decompose_task(
     """
     with kb.connect_closing() as conn:
         task = kb.get_task(conn, task_id)
+        comments = kb.list_comments(conn, task_id) if task is not None else []
     if task is None:
         return DecomposeOutcome(task_id, False, "unknown task id")
     if task.status != "triage":
@@ -319,22 +336,27 @@ def decompose_task(
         task_id=task.id,
         title=_truncate(task.title or "", 400),
         body=_truncate(task.body or "(no body)", 4000),
+        team_assembly=_truncate(_team_assembly_transcript(comments), 5000),
         roster=_format_roster(roster),
         default_assignee=default_assignee,
     )
 
     try:
-        resp = client.chat.completions.create(
+        _create_kwargs = dict(
             model=model,
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": user_msg},
             ],
-            temperature=0.3,
             max_tokens=4000,
             timeout=timeout or 180,
             extra_body=get_auxiliary_extra_body() or None,
         )
+        # Some routers (e.g. Timely w/ claude-opus-4-8) reject `temperature`
+        # as deprecated. Allow opting out via HERMES_AUX_NO_TEMPERATURE=1.
+        if not is_truthy_value(os.getenv("HERMES_AUX_NO_TEMPERATURE", "")):
+            _create_kwargs["temperature"] = 0.3
+        resp = client.chat.completions.create(**_create_kwargs)
     except Exception as exc:
         logger.info(
             "decompose: API call failed for %s (%s)", task_id, exc,

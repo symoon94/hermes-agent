@@ -1598,6 +1598,15 @@ class SpecifyBody(BaseModel):
     author: Optional[str] = None
 
 
+class ClarifyBody(BaseModel):
+    author: Optional[str] = "dashboard"
+
+
+class ClarifyAnswerBody(BaseModel):
+    answer: str
+    author: Optional[str] = "dashboard"
+
+
 @router.post("/tasks/{task_id}/specify")
 def specify_task_endpoint(
     task_id: str,
@@ -1639,6 +1648,84 @@ def specify_task_endpoint(
         "task_id": outcome.task_id,
         "reason": outcome.reason,
         "new_title": outcome.new_title,
+    }
+
+
+@router.post("/tasks/{task_id}/clarify/next")
+def clarify_next_endpoint(
+    task_id: str,
+    payload: ClarifyBody,
+    board: Optional[str] = Query(None),
+):
+    """Ask one human-facing clarify question, or mark the task clarify-ready."""
+    board = _resolve_board(board)
+    with kanban_db.scoped_current_board(board or kanban_db.DEFAULT_BOARD):
+        from hermes_cli import kanban_clarify  # noqa: WPS433 (intentional)
+
+        outcome = kanban_clarify.clarify_next(
+            task_id,
+            author=(payload.author or None),
+        )
+    return {
+        "ok": bool(outcome.ok),
+        "task_id": outcome.task_id,
+        "state": outcome.state,
+        "reason": outcome.reason,
+        "question": outcome.question,
+        "choices": outcome.choices,
+        "rationale": outcome.rationale,
+        "spec_markdown": outcome.spec_markdown,
+    }
+
+
+@router.post("/tasks/{task_id}/clarify/answer")
+def clarify_answer_endpoint(
+    task_id: str,
+    payload: ClarifyAnswerBody,
+    board: Optional[str] = Query(None),
+):
+    """Record the human's answer to the latest clarify question."""
+    board = _resolve_board(board)
+    with kanban_db.scoped_current_board(board or kanban_db.DEFAULT_BOARD):
+        from hermes_cli import kanban_clarify  # noqa: WPS433 (intentional)
+
+        outcome = kanban_clarify.record_answer(
+            task_id,
+            payload.answer,
+            author=(payload.author or None),
+        )
+    return {
+        "ok": bool(outcome.ok),
+        "task_id": outcome.task_id,
+        "state": outcome.state,
+        "reason": outcome.reason,
+    }
+
+
+@router.post("/tasks/{task_id}/clarify/finalize")
+def clarify_finalize_endpoint(
+    task_id: str,
+    payload: ClarifyBody,
+    board: Optional[str] = Query(None),
+):
+    """Draft a clarified spec into the task body while keeping it in triage."""
+    board = _resolve_board(board)
+    with kanban_db.scoped_current_board(board or kanban_db.DEFAULT_BOARD):
+        from hermes_cli import kanban_clarify  # noqa: WPS433 (intentional)
+
+        outcome = kanban_clarify.finalize_spec(
+            task_id,
+            author=(payload.author or None),
+        )
+    return {
+        "ok": bool(outcome.ok),
+        "task_id": outcome.task_id,
+        "state": outcome.state,
+        "reason": outcome.reason,
+        "question": outcome.question,
+        "choices": outcome.choices,
+        "rationale": outcome.rationale,
+        "spec_markdown": outcome.spec_markdown,
     }
 
 
@@ -2209,6 +2296,35 @@ def auto_describe_profile(profile_name: str, payload: DescribeAutoBody):
 
 class DecomposeBody(BaseModel):
     author: Optional[str] = None
+
+
+class TeamAssembleBody(BaseModel):
+    author: Optional[str] = None
+
+
+@router.post("/tasks/{task_id}/team/assemble")
+def assemble_team_endpoint(
+    task_id: str,
+    payload: TeamAssembleBody,
+    board: Optional[str] = Query(None),
+):
+    """Plan a role/profile team for a triage task and store TEAM_ASSEMBLY."""
+    board = _resolve_board(board)
+    with kanban_db.scoped_current_board(board or kanban_db.DEFAULT_BOARD):
+        from hermes_cli import kanban_team  # noqa: WPS433 (intentional)
+        outcome = kanban_team.assemble_team(
+            task_id,
+            author=(payload.author or None),
+        )
+    return {
+        "ok": bool(outcome.ok),
+        "task_id": outcome.task_id,
+        "reason": outcome.reason,
+        "mode": outcome.mode,
+        "roles": outcome.roles,
+        "missing_roles": outcome.missing_roles,
+        "plan": outcome.plan,
+    }
 
 
 @router.post("/tasks/{task_id}/decompose")

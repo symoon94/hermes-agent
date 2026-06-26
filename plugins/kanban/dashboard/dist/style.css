@@ -163,11 +163,228 @@
 }
 .hermes-kanban-dot-triage   { background: #b47dd6; }  /* lilac — fresh/unspecified */
 .hermes-kanban-dot-todo     { background: var(--color-muted-foreground); }
+.hermes-kanban-dot-scheduled{ background: #8b5cf6; }  /* violet */
 .hermes-kanban-dot-ready    { background: #d4b348; }  /* amber */
 .hermes-kanban-dot-running  { background: #3fb97d; }  /* green */
 .hermes-kanban-dot-blocked  { background: var(--color-destructive, #d14a4a); }
+.hermes-kanban-dot-review   { background: #06b6d4; }  /* cyan */
 .hermes-kanban-dot-done     { background: #4a8cd1; }  /* blue */
 .hermes-kanban-dot-archived { background: var(--color-border); }
+
+/* ---- Luna-style priority master list --------------------------------- */
+
+.hermes-kanban-priority-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+  padding-right: 0.15rem;
+}
+
+.hermes-kanban-priority-empty {
+  padding: 1.5rem;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--color-muted-foreground);
+  border: 1px dashed color-mix(in srgb, var(--color-border) 70%, transparent);
+  border-radius: var(--radius-sm, 0.25rem);
+}
+
+.hermes-kanban-priority-row {
+  display: grid;
+  grid-template-columns: auto auto minmax(7rem, auto) minmax(12rem, 1fr) auto;
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.55rem 0.75rem;
+  background: color-mix(in srgb, var(--color-card) 92%, transparent);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid color-mix(in srgb, var(--color-muted-foreground) 60%, transparent);
+  border-radius: var(--radius-sm, 0.25rem);
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.hermes-kanban-priority-row:hover {
+  background: color-mix(in srgb, var(--color-foreground) 4%, var(--color-card));
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--color-foreground) 8%, transparent);
+}
+
+.hermes-kanban-priority-row--selected {
+  box-shadow: 0 0 0 2px var(--color-ring) inset;
+}
+
+.hermes-kanban-priority-row--failed {
+  border-color: var(--color-destructive, #d14a4a);
+}
+
+.hermes-kanban-priority-row--gate {
+  border-left-color: var(--color-destructive, #d14a4a);
+  background: color-mix(in srgb, var(--color-destructive, #d14a4a) 6%, var(--color-card));
+}
+
+.hermes-kanban-priority-check-wrap {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.hermes-kanban-priority-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  color: var(--color-muted-foreground);
+  white-space: nowrap;
+}
+
+.hermes-kanban-priority-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.9rem;
+  color: var(--color-foreground);
+}
+
+.hermes-kanban-priority-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  min-width: 0;
+  color: var(--color-muted-foreground);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.hermes-kanban-priority-status,
+.hermes-kanban-priority-pill,
+.hermes-kanban-human-gate {
+  border: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
+  background: color-mix(in srgb, var(--color-card) 70%, transparent);
+}
+
+.hermes-kanban-priority-pill {
+  color: var(--color-foreground);
+  font-weight: 700;
+}
+
+.hermes-kanban-human-gate {
+  color: var(--color-destructive, #d14a4a);
+  border-color: color-mix(in srgb, var(--color-destructive, #d14a4a) 45%, transparent);
+}
+
+/* ---- Interactive clarify panel --------------------------------------- */
+
+.hermes-kanban-clarify {
+  border: 1px solid color-mix(in srgb, #b47dd6 35%, var(--color-border));
+  background: color-mix(in srgb, #b47dd6 6%, var(--color-card));
+  border-radius: var(--radius-sm, 0.25rem);
+  padding: 0.75rem;
+}
+
+.hermes-kanban-clarify-help,
+.hermes-kanban-clarify-rationale {
+  color: var(--color-muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.hermes-kanban-clarify-question {
+  margin-top: 0.55rem;
+  padding: 0.6rem;
+  border: 1px solid color-mix(in srgb, #b47dd6 35%, var(--color-border));
+  border-radius: var(--radius-sm, 0.25rem);
+  background: color-mix(in srgb, var(--color-card) 82%, transparent);
+}
+
+.hermes-kanban-clarify-q {
+  font-size: 0.9rem;
+  font-weight: 650;
+  margin-bottom: 0.25rem;
+}
+
+.hermes-kanban-clarify-choices,
+.hermes-kanban-clarify-answer-row,
+.hermes-kanban-clarify-history {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+}
+
+.hermes-kanban-clarify-answer-row {
+  align-items: center;
+}
+
+.hermes-kanban-clarify-answer {
+  font-size: 0.75rem;
+  color: var(--color-muted-foreground);
+  border-left: 2px solid color-mix(in srgb, #b47dd6 50%, var(--color-border));
+  padding-left: 0.45rem;
+}
+
+/* ---- Team assembly panel --------------------------------------------- */
+
+.hermes-kanban-team {
+  border: 1px solid color-mix(in srgb, #3fb97d 35%, var(--color-border));
+  background: color-mix(in srgb, #3fb97d 5%, var(--color-card));
+  border-radius: var(--radius-sm, 0.25rem);
+  padding: 0.75rem;
+}
+
+.hermes-kanban-team-mode {
+  border: 1px solid color-mix(in srgb, #3fb97d 45%, var(--color-border));
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
+  color: #3fb97d;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.hermes-kanban-team-roles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-top: 0.6rem;
+}
+
+.hermes-kanban-team-role {
+  border: 1px solid color-mix(in srgb, var(--color-border) 75%, transparent);
+  border-radius: var(--radius-sm, 0.25rem);
+  padding: 0.5rem;
+  background: color-mix(in srgb, var(--color-card) 84%, transparent);
+}
+
+.hermes-kanban-team-role-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
+.hermes-kanban-team-role-body,
+.hermes-kanban-team-role-deliverable,
+.hermes-kanban-team-review {
+  color: var(--color-muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  margin-top: 0.25rem;
+}
+
+@media (max-width: 820px) {
+  .hermes-kanban-priority-row {
+    grid-template-columns: auto auto minmax(5rem, auto) 1fr;
+  }
+  .hermes-kanban-priority-meta {
+    grid-column: 4 / 5;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    white-space: normal;
+  }
+}
 
 /* ---- Progress pill (N/M child tasks done) --------------------------- */
 

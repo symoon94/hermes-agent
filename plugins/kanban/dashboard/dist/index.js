@@ -87,25 +87,29 @@
   }
 
   // Order matches BOARD_COLUMNS in plugin_api.py.
-  const COLUMN_ORDER = ["triage", "todo", "ready", "running", "blocked", "done"];
+  const COLUMN_ORDER = ["triage", "todo", "scheduled", "ready", "running", "blocked", "review", "done"];
   // English fallback dictionaries — used when the i18n catalog is missing
   // a key, and as defaults for the get*() helpers below so callers running
   // outside any React component (where there's no `t`) still get sane text.
   const FALLBACK_COLUMN_LABEL = {
     triage: "Triage",
     todo: "Todo",
+    scheduled: "Scheduled",
     ready: "Ready",
     running: "In Progress",
     blocked: "Blocked",
+    review: "Review",
     done: "Done",
     archived: "Archived",
   };
   const FALLBACK_COLUMN_HELP = {
     triage: "Raw ideas — a specifier will flesh out the spec",
     todo: "Waiting on dependencies or unassigned",
+    scheduled: "Time-based follow-up; dispatcher wakes it later",
     ready: "Dependencies satisfied; assign a profile to dispatch",
     running: "Claimed by a worker — in-flight",
     blocked: "Worker asked for human input",
+    review: "Verification / human review before completion",
     done: "Completed",
     archived: "Archived",
   };
@@ -154,9 +158,11 @@
   const COLUMN_DOT = {
     triage: "hermes-kanban-dot-triage",
     todo: "hermes-kanban-dot-todo",
+    scheduled: "hermes-kanban-dot-scheduled",
     ready: "hermes-kanban-dot-ready",
     running: "hermes-kanban-dot-running",
     blocked: "hermes-kanban-dot-blocked",
+    review: "hermes-kanban-dot-review",
     done: "hermes-kanban-dot-done",
     archived: "hermes-kanban-dot-archived",
   };
@@ -527,6 +533,10 @@
     const [assigneeFilter, setAssigneeFilter] = useState("");
     const [includeArchived, setIncludeArchived] = useState(false);
     const [search, setSearch] = useState("");
+    const [viewMode, setViewMode] = useState(function () {
+      try { return window.localStorage.getItem("hermes.kanban.viewMode") || "board"; }
+      catch (_e) { return "board"; }
+    });
     const [laneByProfile, setLaneByProfile] = useState(true);
     const [configApplied, setConfigApplied] = useState(false);
 
@@ -1053,6 +1063,11 @@
           assigneeFilter, setAssigneeFilter,
           includeArchived, setIncludeArchived,
           laneByProfile, setLaneByProfile,
+          viewMode, setViewMode: function (mode) {
+            const next = mode === "list" ? "list" : "board";
+            setViewMode(next);
+            try { window.localStorage.setItem("hermes.kanban.viewMode", next); } catch (_e) {}
+          },
           search, setSearch,
           onNudgeDispatch: function () {
             SDK.fetchJSON(withBoard(`${API}/dispatch?max=8`, board), { method: "POST" })
@@ -1070,24 +1085,33 @@
          onDelete: deleteSelected,
        }) : null,
         error ? h("div", { className: "text-xs text-destructive px-2" }, error) : null,
-        h(BoardColumns, {
-          board: filteredBoard,
-          laneByProfile,
-          selectedIds,
-          failedIds,
-          draggingTaskId,
-          onDragStart: handleDragStart,
-          onDragEnd: handleDragEnd,
-          toggleSelected,
-          toggleRange,
-          selectAllInColumn,
-          onMove: moveTask,
-          onMoveSelected: moveSelected,
-          onDelete: deleteTask,
-          onOpen: setSelectedTaskId,
-          onCreate: createTask,
-          allTasks: boardData.columns.reduce(function (acc, c) { return acc.concat(c.tasks); }, []),
-        }),
+        viewMode === "list"
+          ? h(PriorityList, {
+              board: filteredBoard,
+              selectedIds,
+              failedIds,
+              toggleSelected,
+              toggleRange,
+              onOpen: setSelectedTaskId,
+            })
+          : h(BoardColumns, {
+              board: filteredBoard,
+              laneByProfile,
+              selectedIds,
+              failedIds,
+              draggingTaskId,
+              onDragStart: handleDragStart,
+              onDragEnd: handleDragEnd,
+              toggleSelected,
+              toggleRange,
+              selectAllInColumn,
+              onMove: moveTask,
+              onMoveSelected: moveSelected,
+              onDelete: deleteTask,
+              onOpen: setSelectedTaskId,
+              onCreate: createTask,
+              allTasks: boardData.columns.reduce(function (acc, c) { return acc.concat(c.tasks); }, []),
+            }),
         selectedTaskId ? h(TaskDrawer, {
           taskId: selectedTaskId,
           boardSlug: board,
@@ -2064,6 +2088,21 @@
         }),
         tx(t, "lanesByProfile", "Lanes by profile"),
       ),
+      h("div", { className: "flex items-center gap-1 rounded-md border border-border p-0.5",
+                 title: "Switch between execution columns and a Luna-style priority master list." },
+        h(Button, {
+          onClick: function () { props.setViewMode("board"); },
+          size: "sm",
+          variant: props.viewMode === "list" ? "outline" : undefined,
+          className: "h-7 text-xs",
+        }, tx(t, "boardView", "Board")),
+        h(Button, {
+          onClick: function () { props.setViewMode("list"); },
+          size: "sm",
+          variant: props.viewMode === "list" ? undefined : "outline",
+          className: "h-7 text-xs",
+        }, tx(t, "priorityView", "Priority list")),
+      ),
       h("div", { className: "flex-1" }),
       h(Button, {
         onClick: props.onNudgeDispatch,
@@ -2269,8 +2308,125 @@
   }
 
   // -------------------------------------------------------------------------
-  // Columns
+  // Columns + cards
   // -------------------------------------------------------------------------
+
+  function flattenBoardTasks(board) {
+    if (!board || !board.columns) return [];
+    const out = [];
+    for (const col of board.columns) {
+      for (const task of col.tasks || []) out.push(task);
+    }
+    return out;
+  }
+
+  function prioritySort(a, b) {
+    // Hermes dispatch priority is descending (larger number claims first).
+    // Keep that backend semantic here, then fall back to creation time/id so
+    // the list is stable and usable as a master queue.
+    const ap = Number(a.priority || 0);
+    const bp = Number(b.priority || 0);
+    if (ap !== bp) return bp - ap;
+    const ac = Number(a.created_at || 0);
+    const bc = Number(b.created_at || 0);
+    if (ac !== bc) return ac - bc;
+    return String(a.id || "").localeCompare(String(b.id || ""));
+  }
+
+  function isHumanGate(task) {
+    return task && (task.status === "triage" || task.status === "blocked" || task.status === "review");
+  }
+
+  function PriorityList(props) {
+    const { t } = useI18n();
+    const tasks = useMemo(function () {
+      return flattenBoardTasks(props.board).sort(prioritySort);
+    }, [props.board]);
+    if (tasks.length === 0) {
+      return h("div", { className: "hermes-kanban-priority-list hermes-kanban-priority-empty" },
+        tx(t, "noTasks", "— no tasks —"));
+    }
+    return h("div", { className: "hermes-kanban-priority-list" },
+      tasks.map(function (task) {
+        return h(PriorityRow, {
+          key: task.id,
+          task,
+          selected: props.selectedIds.has(task.id),
+          failed: props.failedIds && props.failedIds.has(task.id),
+          toggleSelected: props.toggleSelected,
+          toggleRange: props.toggleRange,
+          onOpen: props.onOpen,
+        });
+      }),
+    );
+  }
+
+  function PriorityRow(props) {
+    const { t: i18n } = useI18n();
+    const task = props.task;
+    const gate = isHumanGate(task);
+    const handleClick = function (e) {
+      if (e.shiftKey) {
+        e.preventDefault();
+        if (props.toggleRange) props.toggleRange(task.id);
+        return;
+      }
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        if (props.toggleSelected) props.toggleSelected(task.id, true);
+        return;
+      }
+      props.onOpen(task.id);
+    };
+    return h("div", {
+      className: cn(
+        "hermes-kanban-priority-row",
+        props.selected ? "hermes-kanban-priority-row--selected" : "",
+        props.failed ? "hermes-kanban-priority-row--failed" : "",
+        gate ? "hermes-kanban-priority-row--gate" : "",
+        stalenessClass(task),
+      ),
+      role: "button",
+      tabIndex: 0,
+      onClick: handleClick,
+      onKeyDown: function (e) {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          props.onOpen(task.id);
+        }
+      },
+      title: gate
+        ? "Human gate: triage/blocked/review tasks need operator attention before execution can continue."
+        : "Open task",
+    },
+      h("label", {
+        className: "hermes-kanban-priority-check-wrap",
+        onClick: function (e) { e.stopPropagation(); },
+      },
+        h(Checkbox, {
+          className: "hermes-kanban-card-check",
+          checked: props.selected,
+          onCheckedChange: function () { props.toggleSelected(task.id, true); },
+          onClick: function (e) { e.stopPropagation(); },
+          "aria-label": `Select task ${task.id}`,
+        }),
+      ),
+      h("span", { className: cn("hermes-kanban-dot", COLUMN_DOT[task.status]) }),
+      h("span", { className: "hermes-kanban-priority-id" }, task.id),
+      h("span", { className: "hermes-kanban-priority-title" },
+        task.title || tx(i18n, "untitled", "(untitled)")),
+      h("span", { className: "hermes-kanban-priority-meta" },
+        h("span", { className: "hermes-kanban-priority-status" }, getColumnLabel(i18n, task.status)),
+        task.priority > 0 ? h("span", { className: "hermes-kanban-priority-pill" }, `P${task.priority}`) : null,
+        task.assignee ? h("span", null, "@", task.assignee) : h("span", { className: "hermes-kanban-unassigned" }, tx(i18n, "unassigned", "unassigned")),
+        task.tenant ? h("span", null, task.tenant) : null,
+        task.comment_count > 0 ? h("span", null, "💬 ", task.comment_count) : null,
+        task.progress ? h("span", null, `${task.progress.done}/${task.progress.total}`) : null,
+        gate ? h("span", { className: "hermes-kanban-human-gate" }, "human gate") : null,
+        h("span", { className: "hermes-kanban-ago" }, timeAgo ? timeAgo(task.created_at) : ""),
+      ),
+    );
+  }
 
   function BoardColumns(props) {
     const handleDragStart = useCallback(function (e) {
@@ -2985,6 +3141,51 @@
       });
     };
 
+
+    const doAssembleTeam = function () {
+      return SDK.fetchJSON(
+        withBoard(`${API}/tasks/${encodeURIComponent(props.taskId)}/team/assemble`, boardSlug),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        }
+      ).then(function (res) { load(); props.onRefresh(); return res; });
+    };
+
+    const doClarifyNext = function () {
+      return SDK.fetchJSON(
+        withBoard(`${API}/tasks/${encodeURIComponent(props.taskId)}/clarify/next`, boardSlug),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        }
+      ).then(function (res) { load(); props.onRefresh(); return res; });
+    };
+
+    const doClarifyAnswer = function (answer) {
+      return SDK.fetchJSON(
+        withBoard(`${API}/tasks/${encodeURIComponent(props.taskId)}/clarify/answer`, boardSlug),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ answer: answer }),
+        }
+      ).then(function (res) { load(); props.onRefresh(); return res; });
+    };
+
+    const doClarifyFinalize = function () {
+      return SDK.fetchJSON(
+        withBoard(`${API}/tasks/${encodeURIComponent(props.taskId)}/clarify/finalize`, boardSlug),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        }
+      ).then(function (res) { load(); props.onRefresh(); return res; });
+    };
+
     const addLink = function (parentId) {
       return SDK.fetchJSON(withBoard(`${API}/links`, boardSlug), {
         method: "POST",
@@ -3077,6 +3278,10 @@
           onPatch: doPatch,
           onSpecify: doSpecify,
           onDecompose: doDecompose,
+          onAssembleTeam: doAssembleTeam,
+          onClarifyNext: doClarifyNext,
+          onClarifyAnswer: doClarifyAnswer,
+          onClarifyFinalize: doClarifyFinalize,
           onAddParent: addLink,
           onRemoveParent: removeLink,
           onAddChild: addChild,
@@ -3269,6 +3474,15 @@
         onPatch: props.onPatch,
         onSpecify: props.onSpecify,
         onDecompose: props.onDecompose,
+        onAssembleTeam: props.onAssembleTeam,
+      }),
+      h(TeamAssemblyPanel, { task: t, comments }),
+      h(ClarifyPanel, {
+        task: t,
+        comments,
+        onNext: props.onClarifyNext,
+        onAnswer: props.onClarifyAnswer,
+        onFinalize: props.onClarifyFinalize,
       }),
       h(DiagnosticsSection, {
         task: t,
@@ -3737,6 +3951,170 @@
     );
   }
 
+
+  function parseClarifyPayload(body, prefix) {
+    if (!body || body.indexOf(prefix) !== 0) return null;
+    let payload = body.slice(prefix.length).trim();
+    if (payload[0] === ":") payload = payload.slice(1).trim();
+    const first = payload.indexOf("{");
+    const last = payload.lastIndexOf("}");
+    if (first >= 0 && last > first) {
+      try { return JSON.parse(payload.slice(first, last + 1)); } catch (_e) { /* fallback */ }
+    }
+    return { text: payload };
+  }
+
+  function clarifyState(comments) {
+    const state = { questions: [], answers: [], ready: null, latestQuestion: null };
+    for (const c of comments || []) {
+      const body = c.body || "";
+      if (body.indexOf("CLARIFY_QUESTION") === 0) {
+        const q = parseClarifyPayload(body, "CLARIFY_QUESTION") || {};
+        q.comment = c;
+        state.questions.push(q);
+        state.latestQuestion = q;
+      } else if (body.indexOf("CLARIFY_ANSWER") === 0) {
+        const answer = body.replace(/^CLARIFY_ANSWER\s*:\s*/, "");
+        state.answers.push({ answer, comment: c });
+      } else if (body.indexOf("CLARIFY_READY") === 0) {
+        const r = parseClarifyPayload(body, "CLARIFY_READY") || {};
+        r.comment = c;
+        state.ready = r;
+      }
+    }
+    if (state.answers.length >= state.questions.length) state.latestQuestion = null;
+    return state;
+  }
+
+
+  function parseTeamAssembly(comments) {
+    for (let i = (comments || []).length - 1; i >= 0; i--) {
+      const body = (comments[i] && comments[i].body) || "";
+      if (body.indexOf("TEAM_ASSEMBLY") !== 0) continue;
+      let payload = body.slice("TEAM_ASSEMBLY".length).trim();
+      if (payload[0] === ":") payload = payload.slice(1).trim();
+      const first = payload.indexOf("{");
+      const last = payload.lastIndexOf("}");
+      if (first >= 0 && last > first) {
+        try { return JSON.parse(payload.slice(first, last + 1)); } catch (_e) { return null; }
+      }
+    }
+    return null;
+  }
+
+  function TeamAssemblyPanel(props) {
+    const task = props.task;
+    if (!task || task.status !== "triage") return null;
+    const plan = parseTeamAssembly(props.comments || []);
+    if (!plan) return null;
+    const roles = plan.roles || [];
+    return h("div", { className: "hermes-kanban-section hermes-kanban-team" },
+      h("div", { className: "hermes-kanban-section-head-row" },
+        h("span", { className: "hermes-kanban-section-head" }, "Team Assembly"),
+        h("span", { className: "hermes-kanban-team-mode" }, plan.mode || "solo"),
+      ),
+      plan.rationale ? h("div", { className: "hermes-kanban-clarify-help" }, plan.rationale) : null,
+      roles.length ? h("div", { className: "hermes-kanban-team-roles" }, roles.map(function (r, i) {
+        return h("div", { key: i, className: "hermes-kanban-team-role" },
+          h("div", { className: "hermes-kanban-team-role-head" },
+            h("span", null, r.role || "worker"),
+            h("span", { className: r.profile ? "" : "hermes-kanban-human-gate" }, r.profile ? "@" + r.profile : "missing profile"),
+          ),
+          r.responsibility ? h("div", { className: "hermes-kanban-team-role-body" }, r.responsibility) : null,
+          r.deliverable ? h("div", { className: "hermes-kanban-team-role-deliverable" }, "↳ ", r.deliverable) : null,
+        );
+      })) : null,
+      plan.review_strategy ? h("div", { className: "hermes-kanban-team-review" }, "Review: ", plan.review_strategy) : null,
+    );
+  }
+
+  function ClarifyPanel(props) {
+    const { t } = useI18n();
+    const task = props.task;
+    const [busy, setBusy] = useState(null);
+    const [msg, setMsg] = useState(null);
+    const [answer, setAnswer] = useState("");
+    if (!task || task.status !== "triage") return null;
+    const st = clarifyState(props.comments || []);
+    const q = st.latestQuestion;
+    const run = function (kind, fn) {
+      if (!fn || busy) return;
+      setBusy(kind); setMsg(null);
+      fn().then(function (res) {
+        if (!res || !res.ok) {
+          setMsg({ ok: false, text: (res && res.reason) || "Clarify failed" });
+        } else if (res.state === "question") {
+          setMsg({ ok: true, text: "Clarify question added." });
+        } else if (res.state === "ready") {
+          setMsg({ ok: true, text: "Clarified spec drafted. Run Specify to polish/promote." });
+        } else {
+          setMsg({ ok: true, text: "Recorded." });
+        }
+      }).catch(function (e) {
+        setMsg({ ok: false, text: String(e.message || e) });
+      }).then(function () { setBusy(null); });
+    };
+    const submitAnswer = function (text) {
+      const val = (text || answer || "").trim();
+      if (!val) return;
+      run("answer", function () { return props.onAnswer(val).then(function (res) { setAnswer(""); return res; }); });
+    };
+    return h("div", { className: "hermes-kanban-section hermes-kanban-clarify" },
+      h("div", { className: "hermes-kanban-section-head-row" },
+        h("span", { className: "hermes-kanban-section-head" }, "Interactive Clarify"),
+        h("span", { className: "text-xs text-muted-foreground" },
+          `${st.questions.length} Q / ${st.answers.length} A`),
+      ),
+      h("div", { className: "hermes-kanban-clarify-help" },
+        "Ask one human-facing question at a time, then use Hermes Specify to polish the clarified transcript."),
+      q ? h("div", { className: "hermes-kanban-clarify-question" },
+        h("div", { className: "hermes-kanban-clarify-q" }, q.question || q.text || "Clarify question"),
+        q.rationale ? h("div", { className: "hermes-kanban-clarify-rationale" }, q.rationale) : null,
+        q.choices && q.choices.length ? h("div", { className: "hermes-kanban-clarify-choices" },
+          q.choices.map(function (choice) {
+            return h(Button, {
+              key: choice,
+              size: "sm",
+              variant: "outline",
+              disabled: !!busy,
+              onClick: function () { submitAnswer(choice); },
+            }, choice);
+          })
+        ) : null,
+      ) : st.ready ? h("div", { className: "hermes-kanban-msg-ok" },
+        "Clarify ready — body has a clarified draft. Run Specify or Decompose next.") : null,
+      h("div", { className: "hermes-kanban-clarify-answer-row" },
+        h(Input, {
+          value: answer,
+          onChange: function (e) { setAnswer(e.target.value); },
+          onKeyDown: function (e) { if (e.key === "Enter") { e.preventDefault(); submitAnswer(); } },
+          placeholder: q ? "Answer or custom choice…" : "Optional answer / note…",
+          className: "h-8 text-sm flex-1",
+        }),
+        h(Button, { size: "sm", disabled: !answer.trim() || !!busy, onClick: function () { submitAnswer(); } },
+          busy === "answer" ? "Saving…" : "Answer"),
+      ),
+      h("div", { className: "hermes-kanban-actions" },
+        h(Button, {
+          size: "sm",
+          disabled: !!busy,
+          onClick: function () { run("next", props.onNext); },
+        }, busy === "next" ? "Thinking…" : "Ask next question"),
+        h(Button, {
+          size: "sm",
+          disabled: !!busy,
+          onClick: function () { run("finalize", props.onFinalize); },
+        }, busy === "finalize" ? "Finalizing…" : "Finalize clarified spec"),
+      ),
+      msg ? h("div", { className: msg.ok ? "hermes-kanban-msg-ok" : "hermes-kanban-msg-err" }, msg.text) : null,
+      st.answers.length ? h("div", { className: "hermes-kanban-clarify-history" },
+        st.answers.slice(-3).map(function (a, i) {
+          return h("div", { key: i, className: "hermes-kanban-clarify-answer" }, a.answer);
+        })
+      ) : null,
+    );
+  }
+
   function StatusActions(props) {
     const { t } = useI18n();
     const task = props.task;
@@ -3744,6 +4122,8 @@
     const [specifyMsg, setSpecifyMsg] = useState(null);
     const [decomposeBusy, setDecomposeBusy] = useState(false);
     const [decomposeMsg, setDecomposeMsg] = useState(null);
+    const [teamBusy, setTeamBusy] = useState(false);
+    const [teamMsg, setTeamMsg] = useState(null);
     const b = function (label, patch, enabled, confirmMsg) {
       return h(Button, {
         onClick: function () { if (enabled !== false) props.onPatch(patch, { confirm: confirmMsg }); },
@@ -3786,6 +4166,27 @@
           disabled: specifyBusy,
           size: "sm",
         }, specifyBusy ? "Specifying…" : "✨ Specify")
+      : null;
+
+    const teamButton = (task.status === "triage" && props.onAssembleTeam)
+      ? h(Button, {
+          onClick: function () {
+            if (teamBusy) return;
+            setTeamBusy(true); setTeamMsg(null);
+            props.onAssembleTeam().then(function (res) {
+              if (res && res.ok) {
+                const n = (res.roles || []).length;
+                setTeamMsg({ ok: true, text: `Team assembled: ${res.mode || "solo"}${n ? ` (${n} roles)` : ""}` });
+              } else {
+                setTeamMsg({ ok: false, text: "Team assembly failed: " + ((res && res.reason) || "unknown error") });
+              }
+            }).catch(function (err) {
+              setTeamMsg({ ok: false, text: "Team assembly failed: " + (err.message || String(err)) });
+            }).then(function () { setTeamBusy(false); });
+          },
+          disabled: teamBusy,
+          size: "sm",
+        }, teamBusy ? "Assembling…" : "👥 Assemble team")
       : null;
 
     // "Decompose" is the built-in decomposer fan-out. Like Specify, only
@@ -3838,6 +4239,7 @@
     return h("div", null,
       h("div", { className: "hermes-kanban-actions" },
         specifyButton,
+        teamButton,
         decomposeButton,
         b("→ triage",  { status: "triage" },   task.status !== "triage"),
         b("→ ready",   { status: "ready" },    task.status !== "ready"),
@@ -3860,6 +4262,11 @@
           ? "hermes-kanban-msg-ok"
           : "hermes-kanban-msg-err",
       }, specifyMsg.text) : null,
+      teamMsg ? h("div", {
+        className: teamMsg.ok
+          ? "hermes-kanban-msg-ok"
+          : "hermes-kanban-msg-err",
+      }, teamMsg.text) : null,
       decomposeMsg ? h("div", {
         className: decomposeMsg.ok
           ? "hermes-kanban-msg-ok"
