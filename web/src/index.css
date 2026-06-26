@@ -43,46 +43,46 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* Hermes Agent — Nous DS with the LENS_0 (Hermes teal) lens applied   */
-/* statically. Mirrors nousnet-web/(hermes-agent)/layout.tsx so the    */
-/* canonical Hermes palette is the default — teal canvas + cream      */
-/* accent — without relying on leva/gsap at runtime.                  */
+/* Hermes Agent — Nous DS with a near-black charcoal lens applied      */
+/* statically. Mirrors the default dashboard theme — charcoal canvas   */
+/* + soft amber accent — without relying on leva/gsap at runtime.      */
 /* ------------------------------------------------------------------ */
 
 :root {
   /* LENS_0 — from design-language/src/ui/components/overlays/index.tsx.
-     These are the defaults for the `default` (Hermes Teal) dashboard theme;
+     These are the defaults for the `default` (Charcoal Large) dashboard theme;
      ThemeProvider rewrites them as inline styles when a user switches themes. */
   --foreground: color-mix(in srgb, #ffffff 0%, transparent);
   --foreground-base: #ffffff;
   --foreground-alpha: 0;
-  --midground: color-mix(in srgb, #ffe6cb 100%, transparent);
-  --midground-base: #ffe6cb;
+  --midground: color-mix(in srgb, #f1eadc 100%, transparent);
+  --midground-base: #f1eadc;
   --midground-alpha: 1;
-  --background: color-mix(in srgb, #041c1c 100%, transparent);
-  --background-base: #041c1c;
+  --background: color-mix(in srgb, #0f0f0e 100%, transparent);
+  --background-base: #0f0f0e;
   --background-alpha: 1;
 
   /* Consumed by <Backdrop />; also theme-switchable. */
-  --warm-glow: rgba(255, 189, 56, 0.35);
-  --noise-opacity-mul: 1;
+  --warm-glow: rgba(210, 170, 104, 0.18);
+  --noise-opacity-mul: 0.65;
 
   /* Typography tokens — rewritten by ThemeProvider. Defaults match the
      system stack so themes that don't override look native. */
-  --theme-font-sans: system-ui, -apple-system, "Segoe UI", Roboto,
+  --theme-font-sans: ui-rounded, "SF Pro Rounded", "Pretendard Variable",
+    Pretendard, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
   --theme-font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo,
     Consolas, monospace;
   --theme-font-display: var(--theme-font-sans);
-  --theme-base-size: 15px;
-  --theme-line-height: 1.55;
+  --theme-base-size: 18px;
+  --theme-line-height: 1.65;
   --theme-letter-spacing: 0;
 
   /* Layout tokens. */
-  --radius: 0.5rem;
-  --theme-radius: 0.5rem;
+  --radius: 0.85rem;
+  --theme-radius: 0.85rem;
   --theme-spacing-mul: 1;
-  --theme-density: comfortable;
+  --theme-density: spacious;
 
   /* Data-series accents — consumed by Analytics + Models pages for the
      input-vs-output token visualisations (chart bars, table values,
@@ -90,8 +90,8 @@
      look: cream input + emerald-400 output read as warm/cool against
      the dark canvas. Themes override via ThemeProvider, which emits
      these as `--series-input-token` / `--series-output-token`. */
-  --series-input-token: #ffe6cb;
-  --series-output-token: #34d399;
+  --series-input-token: #d2aa68;
+  --series-output-token: #c5d4e8;
 }
 
 /* Theme tokens cascade into the document root so every descendant inherits

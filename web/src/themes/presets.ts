@@ -40,18 +40,53 @@ const DEFAULT_LAYOUT: ThemeLayout = {
 
 export const defaultTheme: DashboardTheme = {
   name: "default",
-  label: "Hermes Teal",
-  description: "Classic dark teal — the canonical Hermes look",
+  label: "Charcoal Large",
+  description: "Near-black charcoal with larger, softer system typography",
   palette: {
-    background: { hex: "#041c1c", alpha: 1 },
-    midground: { hex: "#ffe6cb", alpha: 1 },
+    background: { hex: "#0f0f0e", alpha: 1 },
+    midground: { hex: "#f1eadc", alpha: 1 },
     foreground: { hex: "#ffffff", alpha: 0 },
-    warmGlow: "rgba(255, 189, 56, 0.35)",
-    noiseOpacity: 1,
+    warmGlow: "rgba(210, 170, 104, 0.18)",
+    noiseOpacity: 0.65,
   },
-  typography: DEFAULT_TYPOGRAPHY,
-  layout: DEFAULT_LAYOUT,
+  typography: {
+    ...DEFAULT_TYPOGRAPHY,
+    fontSans:
+      'ui-rounded, "SF Pro Rounded", "Pretendard Variable", Pretendard, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+    baseSize: "18px",
+    lineHeight: "1.65",
+  },
+  layout: {
+    ...DEFAULT_LAYOUT,
+    radius: "0.85rem",
+    density: "spacious",
+  },
   terminalBackground: "#000000",
+  colorOverrides: {
+    primary: "#d2aa68",
+    primaryForeground: "#17130d",
+    secondary: "#24221f",
+    secondaryForeground: "#f1eadc",
+    muted: "#24221f",
+    mutedForeground: "#b4aa9a",
+    accent: "#2e2b27",
+    accentForeground: "#f1eadc",
+    card: "#1b1a18",
+    cardForeground: "#f1eadc",
+    popover: "#1b1a18",
+    popoverForeground: "#f1eadc",
+    border: "#38342f",
+    input: "#38342f",
+    ring: "#d2aa68",
+    warning: "#d2aa68",
+    success: "#7fb77e",
+    destructive: "#c76c63",
+  },
+  seriesColors: {
+    inputTokenAccent: "#d2aa68",
+    outputTokenAccent: "#c5d4e8",
+  },
+  swatchColors: ["#0f0f0e", "#f1eadc", "#d2aa68"],
 };
 
 export const midnightTheme: DashboardTheme = {
@@ -279,24 +314,27 @@ export const nousBlueTheme: DashboardTheme = {
 };
 
 /**
- * Same look as ``defaultTheme`` but with a larger root font size, looser
- * line-height, and ``spacious`` density so every rem-based size in the
- * dashboard scales up. For users who find the default 15px UI too dense.
+ * Same charcoal look as ``defaultTheme`` but with an even larger root font
+ * size for users who want maximum readability.
  */
 export const defaultLargeTheme: DashboardTheme = {
   name: "default-large",
-  label: "Hermes Teal (Large)",
-  description: "Hermes Teal with bigger fonts and roomier spacing",
+  label: "Charcoal XL",
+  description: "Near-black charcoal with extra-large fonts and roomier spacing",
   palette: defaultTheme.palette,
   typography: {
-    ...DEFAULT_TYPOGRAPHY,
-    baseSize: "18px",
-    lineHeight: "1.65",
+    ...defaultTheme.typography,
+    baseSize: "20px",
+    lineHeight: "1.7",
   },
   layout: {
-    ...DEFAULT_LAYOUT,
+    ...defaultTheme.layout,
     density: "spacious",
   },
+  terminalBackground: defaultTheme.terminalBackground,
+  colorOverrides: defaultTheme.colorOverrides,
+  seriesColors: defaultTheme.seriesColors,
+  swatchColors: ["#0b0b0a", "#f1eadc", "#d2aa68"],
 };
 
 export const BUILTIN_THEMES: Record<string, DashboardTheme> = {
