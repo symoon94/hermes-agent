@@ -825,6 +825,14 @@
       });
     }, [loadBoard, loadBoardList, board, t]);
 
+    const createRoutine = useCallback(function (payload) {
+      return SDK.fetchJSON(withBoard(`${API}/routines`, board), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then(loadBoard).catch(function (e) { setError(String(e.message || e)); });
+    }, [loadBoard, board]);
+
     const toggleRoutine = useCallback(function (routine, checked) {
       return SDK.fetchJSON(withBoard(`${API}/routines/${encodeURIComponent(routine.id)}/check`, board), {
         method: "POST",
@@ -1081,6 +1089,7 @@
         }),
         h(RoutinePanel, {
           routines: (boardData && boardData.routines) || [],
+          onCreate: createRoutine,
           onToggle: toggleRoutine,
           onArchive: archiveRoutine,
           onPromote: promoteRoutine,
@@ -2061,10 +2070,21 @@
 
   function RoutinePanel(props) {
     const routines = props.routines || [];
-    if (!routines.length) return null;
+    const [title, setTitle] = useState("");
+    const [frequency, setFrequency] = useState("daily");
+    const [adding, setAdding] = useState(false);
     const daily = routines.filter(function (r) { return r.frequency === "daily" || r.frequency === "weekdays"; });
     const weekly = routines.filter(function (r) { return r.frequency === "weekly"; });
     const other = routines.filter(function (r) { return daily.indexOf(r) === -1 && weekly.indexOf(r) === -1; });
+    function submit(e) {
+      if (e && e.preventDefault) e.preventDefault();
+      const clean = title.trim();
+      if (!clean || adding) return;
+      setAdding(true);
+      Promise.resolve(props.onCreate({ title: clean, frequency: frequency }))
+        .then(function () { setTitle(""); setFrequency("daily"); })
+        .finally(function () { setAdding(false); });
+    }
     function group(label, items) {
       if (!items.length) return null;
       return h("div", { className: "hermes-kanban-routine-group" },
@@ -2088,6 +2108,7 @@
       );
     }
     const done = routines.filter(function (r) { return r.checked_today; }).length;
+    const empty = routines.length === 0;
     return h("section", { className: "hermes-kanban-routine-panel" },
       h("div", { className: "hermes-kanban-routine-head" },
         h("div", null,
@@ -2096,11 +2117,29 @@
         ),
         h("div", { className: "hermes-kanban-routine-count" }, `${done}/${routines.length}`),
       ),
-      h("div", { className: "hermes-kanban-routine-grid" },
-        group("Today", daily),
-        group("This week", weekly),
-        group("Other", other),
+      h("form", { className: "hermes-kanban-routine-add", onSubmit: submit },
+        h(Input, {
+          value: title,
+          onChange: function (e) { setTitle(e.target.value); },
+          placeholder: "Add a routine…",
+          className: "h-8 text-xs",
+          title: "Add a daily/weekly checklist item. It will not enter the ranked task queue.",
+        }),
+        h(Select, Object.assign({ value: frequency, className: "h-8 text-xs" }, selectChangeHandler(setFrequency)),
+          h(SelectOption, { value: "daily" }, "daily"),
+          h(SelectOption, { value: "weekly" }, "weekly"),
+          h(SelectOption, { value: "weekdays" }, "weekdays"),
+          h(SelectOption, { value: "other" }, "other"),
+        ),
+        h(Button, { type: "submit", size: "sm", disabled: adding || !title.trim(), className: "h-8 text-xs" }, adding ? "Adding…" : "Add"),
       ),
+      empty
+        ? h("div", { className: "hermes-kanban-routine-empty" }, "No routines yet. Add daily/weekly checklist items here; keep one-off work in the ranked task list.")
+        : h("div", { className: "hermes-kanban-routine-grid" },
+            group("Today", daily),
+            group("This week", weekly),
+            group("Other", other),
+          ),
     );
   }
 
