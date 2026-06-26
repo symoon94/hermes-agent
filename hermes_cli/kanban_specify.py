@@ -185,13 +185,21 @@ def specify_task(
     )
 
     try:
+        from agent.anthropic_adapter import _forbids_sampling_params as _fsp
+        _aux_temperature = None if _fsp(model) else 0.3
+    except Exception:
+        _aux_temperature = 0.3
+    _aux_kwargs = {}
+    if _aux_temperature is not None:
+        _aux_kwargs["temperature"] = _aux_temperature
+    try:
         resp = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": user_msg},
             ],
-            temperature=0.3,
+            **_aux_kwargs,
             max_tokens=HERMES_KANBAN_SPECIFY_MAX_TOKENS,
             timeout=timeout or 120,
             extra_body=get_auxiliary_extra_body() or None,

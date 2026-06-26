@@ -17,6 +17,7 @@ from typing import Dict, List, Optional, Any, Callable
 from enum import Enum
 
 from hermes_cli.config import get_hermes_home
+from agent.secret_scope import get_secret
 from utils import env_int, is_truthy_value
 
 logger = logging.getLogger(__name__)
@@ -1366,7 +1367,7 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
         )
 
     # Slack
-    slack_token = os.getenv("SLACK_BOT_TOKEN")
+    slack_token = get_secret("SLACK_BOT_TOKEN", "")
     if slack_token:
         if Platform.SLACK not in config.platforms:
             # No yaml config for Slack — env-only setup, enable it

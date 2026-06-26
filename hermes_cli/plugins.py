@@ -926,6 +926,31 @@ class PluginContext:
             action_id,
         )
 
+    def register_slack_reaction_handler(
+        self,
+        reaction: Any,
+        callback: Callable,
+    ) -> None:
+        """Register a Slack emoji reaction_added handler from a plugin."""
+        if not callable(callback):
+            raise ValueError(
+                f"Plugin '{self.manifest.name}' tried to register a Slack "
+                f"reaction handler with a non-callable callback."
+            )
+        if reaction is None or (isinstance(reaction, str) and not reaction.strip()):
+            raise ValueError(
+                f"Plugin '{self.manifest.name}' tried to register a Slack "
+                f"reaction handler with an empty reaction."
+            )
+        self._manager._slack_reaction_handlers.append(
+            (reaction, callback, self.manifest.name)
+        )
+        logger.debug(
+            "Plugin %s registered Slack reaction handler: %s",
+            self.manifest.name,
+            reaction,
+        )
+
     # -- hook registration --------------------------------------------------
 
     # -- auxiliary task registration ---------------------------------------
@@ -1157,6 +1182,10 @@ class PluginManager:
         # ``re.Pattern``, or a constraint dict); ``callback`` is an async
         # function with the slack_bolt signature ``(ack, body, action)``.
         self._slack_action_handlers: List[tuple] = []
+        # Slack emoji reaction handlers registered by plugins. Each entry is
+        # (reaction_matcher, callback, plugin_name). The callback signature is
+        # async ``(event, client, say)`` and is invoked for ``reaction_added``.
+        self._slack_reaction_handlers: List[tuple] = []
 
     # -----------------------------------------------------------------------
     # Public
@@ -1190,6 +1219,7 @@ class PluginManager:
             self._plugin_skills.clear()
             self._aux_tasks.clear()
             self._slack_action_handlers.clear()
+            self._slack_reaction_handlers.clear()
             self._context_engine = None
         # Set the flag up front as a re-entrancy guard (a plugin's register()
         # can transitively trigger discovery again), but reset it if the sweep
@@ -1785,6 +1815,10 @@ class PluginManager:
         :meth:`PluginContext.register_slack_action_handler`.
         """
         return list(self._slack_action_handlers)
+
+    def get_slack_reaction_handlers(self) -> List[tuple]:
+        """Return plugin-registered Slack emoji reaction handlers."""
+        return list(self._slack_reaction_handlers)
 
     # -----------------------------------------------------------------------
     # Introspection

@@ -33,6 +33,7 @@ except ImportError:
 
 import sys
 from pathlib import Path as _Path
+from agent.secret_scope import get_secret
 
 sys.path.insert(0, str(_Path(__file__).resolve().parents[3]))
 
@@ -838,7 +839,7 @@ class SlackAdapter(BasePlatformAdapter):
             return False
 
         raw_token = self.config.token
-        app_token = os.getenv("SLACK_APP_TOKEN")
+        app_token = get_secret("SLACK_APP_TOKEN", "")
 
         if not raw_token:
             logger.error("[Slack] SLACK_BOT_TOKEN not set")
@@ -988,13 +989,13 @@ class SlackAdapter(BasePlatformAdapter):
             async def handle_file_change(event, say):
                 pass
 
-            # Reactions are useful lightweight acknowledgements in Slack, but
-            # Hermes does not currently need to route them into the agent loop.
-            # Ack the events explicitly so high-traffic channels do not fill
-            # gateway.error.log with Slack Bolt "Unhandled request" warnings.
+            # Reactions are lightweight in normal Slack usage, but some
+            # workspaces use named emoji as durable workflow triggers. Route
+            # reaction_added through plugin-registered handlers; if none match,
+            # this remains an explicit no-op ack so Bolt does not warn.
             @self._app.event("reaction_added")
             async def handle_reaction_added(event, say):
-                pass
+                await self._handle_plugin_reaction_added(event, say)
 
             @self._app.event("reaction_removed")
             async def handle_reaction_removed(event, say):
@@ -1110,6 +1111,21 @@ class SlackAdapter(BasePlatformAdapter):
                 logger.info(
                     "[Slack] Wired %d plugin action handler(s)",
                     len(_plugin_handlers),
+                )
+
+            try:
+                from hermes_cli.plugins import get_plugin_manager
+                _reaction_handlers = get_plugin_manager().get_slack_reaction_handlers()
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning(
+                    "[Slack] Could not load plugin reaction handlers: %s", e,
+                )
+                _reaction_handlers = []
+            self._plugin_reaction_handlers = _reaction_handlers
+            if _reaction_handlers:
+                logger.info(
+                    "[Slack] Wired %d plugin reaction handler(s)",
+                    len(_reaction_handlers),
                 )
 
             # Bring up the handler and watchdog atomically. ``_running`` only
@@ -2270,6 +2286,44 @@ class SlackAdapter(BasePlatformAdapter):
         metadata = self._extract_assistant_thread_metadata(event)
         self._cache_assistant_thread_metadata(metadata)
         self._seed_assistant_thread_session(metadata)
+
+    async def _handle_plugin_reaction_added(self, event: dict, say) -> None:
+        """Dispatch Slack reaction_added events to plugin handlers."""
+        reaction = str((event or {}).get("reaction") or "").strip().strip(":")
+        if not reaction:
+            return
+        handlers = getattr(self, "_plugin_reaction_handlers", None)
+        if handlers is None:
+            try:
+                from hermes_cli.plugins import get_plugin_manager
+                handlers = get_plugin_manager().get_slack_reaction_handlers()
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("[Slack] Could not load plugin reaction handlers: %s", exc)
+                handlers = []
+            self._plugin_reaction_handlers = handlers
+        if not handlers:
+            return
+
+        def _matches(matcher, name: str) -> bool:
+            if matcher == "*":
+                return True
+            if isinstance(matcher, str):
+                return matcher.strip().strip(":") == name
+            try:
+                return bool(matcher.match(name))
+            except Exception:
+                return False
+
+        for matcher, cb, plugin_name in handlers:
+            if not _matches(matcher, reaction):
+                continue
+            try:
+                await cb(event, self._app.client, say)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.error(
+                    "[Slack] Plugin '%s' reaction handler raised: %s",
+                    plugin_name, exc, exc_info=True,
+                )
 
     async def _handle_slack_file_shared(self, event: dict) -> None:
         """Fallback for Slack file shares that do not arrive as message.files.
