@@ -825,6 +825,28 @@
       });
     }, [loadBoard, loadBoardList, board, t]);
 
+    const toggleRoutine = useCallback(function (routine, checked) {
+      return SDK.fetchJSON(withBoard(`${API}/routines/${encodeURIComponent(routine.id)}/check`, board), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ checked: checked }),
+      }).then(loadBoard).catch(function (e) { setError(String(e.message || e)); });
+    }, [loadBoard, board]);
+
+    const archiveRoutine = useCallback(function (routine) {
+      if (!window.confirm(`Hide routine '${routine.title}'?`)) return Promise.resolve();
+      return SDK.fetchJSON(withBoard(`${API}/routines/${encodeURIComponent(routine.id)}`, board), { method: "DELETE" })
+        .then(loadBoard).catch(function (e) { setError(String(e.message || e)); });
+    }, [loadBoard, board]);
+
+    const promoteRoutine = useCallback(function (routine) {
+      return createTask({
+        title: routine.title,
+        body: routine.body || `Promoted from routine ${routine.id}.`,
+        triage: true,
+      });
+    }, [createTask]);
+
     const toggleSelected = useCallback(function (id, additive) {
       setSelectedIds(function (prev) {
         const next = new Set(additive ? prev : []);
@@ -1056,6 +1078,12 @@
         h(AttentionStrip, {
           boardData,
           onOpen: setSelectedTaskId,
+        }),
+        h(RoutinePanel, {
+          routines: (boardData && boardData.routines) || [],
+          onToggle: toggleRoutine,
+          onArchive: archiveRoutine,
+          onPromote: promoteRoutine,
         }),
         h(BoardToolbar, {
           board: boardData,
@@ -2023,6 +2051,55 @@
             disabled: submitting || !slug.trim(),
           }, submitting ? tx(t, "creating", "Creating…") : tx(t, "createBoard", "Create board")),
         ),
+      ),
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Routine checklist
+  // -------------------------------------------------------------------------
+
+  function RoutinePanel(props) {
+    const routines = props.routines || [];
+    if (!routines.length) return null;
+    const daily = routines.filter(function (r) { return r.frequency === "daily" || r.frequency === "weekdays"; });
+    const weekly = routines.filter(function (r) { return r.frequency === "weekly"; });
+    const other = routines.filter(function (r) { return daily.indexOf(r) === -1 && weekly.indexOf(r) === -1; });
+    function group(label, items) {
+      if (!items.length) return null;
+      return h("div", { className: "hermes-kanban-routine-group" },
+        h("div", { className: "hermes-kanban-routine-group-title" }, label),
+        items.map(function (r) {
+          return h("div", { key: r.id, className: "hermes-kanban-routine-item" + (r.checked_today ? " hermes-kanban-routine-item--done" : "") },
+            h("label", { className: "hermes-kanban-routine-check" },
+              h("input", {
+                type: "checkbox",
+                checked: !!r.checked_today,
+                onChange: function (e) { props.onToggle(r, e.target.checked); },
+              }),
+              h("span", { className: "hermes-kanban-routine-title", title: r.body || r.title }, r.title),
+            ),
+            h("div", { className: "hermes-kanban-routine-actions" },
+              h("button", { type: "button", title: "Promote to triage task", onClick: function () { props.onPromote(r); } }, "↗"),
+              h("button", { type: "button", title: "Hide routine", onClick: function () { props.onArchive(r); } }, "×"),
+            ),
+          );
+        }),
+      );
+    }
+    const done = routines.filter(function (r) { return r.checked_today; }).length;
+    return h("section", { className: "hermes-kanban-routine-panel" },
+      h("div", { className: "hermes-kanban-routine-head" },
+        h("div", null,
+          h("div", { className: "hermes-kanban-routine-label" }, "Routine checklist"),
+          h("div", { className: "hermes-kanban-routine-sub" }, "Not ranked. Repeating life/work rhythm lives outside the priority queue."),
+        ),
+        h("div", { className: "hermes-kanban-routine-count" }, `${done}/${routines.length}`),
+      ),
+      h("div", { className: "hermes-kanban-routine-grid" },
+        group("Today", daily),
+        group("This week", weekly),
+        group("Other", other),
       ),
     );
   }

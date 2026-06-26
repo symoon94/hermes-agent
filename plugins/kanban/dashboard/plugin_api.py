@@ -176,6 +176,10 @@ def _task_dict(
     return d
 
 
+def _routine_dict(item: kanban_db.RoutineItem) -> dict[str, Any]:
+    return asdict(item)
+
+
 def _event_dict(event: kanban_db.Event) -> dict[str, Any]:
     return {
         "id": event.id,
@@ -497,7 +501,10 @@ def get_board(
             )
         ]
 
+        routines = [_routine_dict(r) for r in kanban_db.list_routines(conn)]
+
         return {
+            "routines": routines,
             "columns": [
                 {"name": name, "tasks": columns[name]} for name in columns.keys()
             ],
@@ -576,6 +583,80 @@ def get_task(
 # ---------------------------------------------------------------------------
 # POST /tasks
 # ---------------------------------------------------------------------------
+
+class RoutineCreateBody(BaseModel):
+    title: str
+    body: Optional[str] = None
+    frequency: str = "daily"
+    sort_order: Optional[int] = None
+    source_task_id: Optional[str] = None
+
+
+class RoutineCheckBody(BaseModel):
+    checked: bool = True
+    check_date: Optional[str] = None
+
+
+@router.get("/routines")
+def list_routines(board: Optional[str] = Query(None)):
+    board = _resolve_board(board)
+    conn = _conn(board=board)
+    try:
+        return {"routines": [_routine_dict(r) for r in kanban_db.list_routines(conn)]}
+    finally:
+        conn.close()
+
+
+@router.post("/routines")
+def create_routine(payload: RoutineCreateBody, board: Optional[str] = Query(None)):
+    board = _resolve_board(board)
+    conn = _conn(board=board)
+    try:
+        rid = kanban_db.create_routine_item(
+            conn,
+            title=payload.title,
+            body=payload.body,
+            frequency=payload.frequency,
+            sort_order=payload.sort_order,
+            source_task_id=payload.source_task_id,
+        )
+        item = next((r for r in kanban_db.list_routines(conn, include_inactive=True) if r.id == rid), None)
+        return {"routine": _routine_dict(item) if item else {"id": rid}}
+    finally:
+        conn.close()
+
+
+@router.post("/routines/{routine_id}/check")
+def set_routine_check(routine_id: str, payload: RoutineCheckBody, board: Optional[str] = Query(None)):
+    board = _resolve_board(board)
+    conn = _conn(board=board)
+    try:
+        ok = kanban_db.set_routine_checked(
+            conn,
+            routine_id,
+            payload.checked,
+            check_date=payload.check_date,
+            checked_by="dashboard",
+        )
+        if not ok:
+            raise HTTPException(status_code=404, detail="Routine not found")
+        item = next((r for r in kanban_db.list_routines(conn, include_inactive=True, check_date=payload.check_date) if r.id == routine_id), None)
+        return {"routine": _routine_dict(item) if item else None}
+    finally:
+        conn.close()
+
+
+@router.delete("/routines/{routine_id}")
+def archive_routine(routine_id: str, board: Optional[str] = Query(None)):
+    board = _resolve_board(board)
+    conn = _conn(board=board)
+    try:
+        if not kanban_db.archive_routine_item(conn, routine_id):
+            raise HTTPException(status_code=404, detail="Routine not found")
+        return {"ok": True}
+    finally:
+        conn.close()
+
 
 class CreateTaskBody(BaseModel):
     title: str

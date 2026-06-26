@@ -1798,3 +1798,103 @@
 .hermes-kanban-trash-label {
   font-weight: 500;
 }
+/* ---- Routine checklist ------------------------------------------------ */
+.hermes-kanban-routine-panel {
+  border: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-card) 92%, transparent);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+}
+.hermes-kanban-routine-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-bottom: 0.6rem;
+}
+.hermes-kanban-routine-label {
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--color-foreground);
+}
+.hermes-kanban-routine-sub {
+  font-size: 0.72rem;
+  color: var(--color-muted-foreground);
+  margin-top: 0.1rem;
+}
+.hermes-kanban-routine-count {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+  color: var(--color-muted-foreground);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 0.15rem 0.45rem;
+}
+.hermes-kanban-routine-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.65rem;
+}
+.hermes-kanban-routine-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.hermes-kanban-routine-group-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-muted-foreground);
+}
+.hermes-kanban-routine-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.38rem 0.48rem;
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  border-radius: var(--radius-sm, 0.25rem);
+  background: color-mix(in srgb, var(--color-background) 55%, transparent);
+}
+.hermes-kanban-routine-item--done .hermes-kanban-routine-title {
+  text-decoration: line-through;
+  color: var(--color-muted-foreground);
+}
+.hermes-kanban-routine-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  cursor: pointer;
+}
+.hermes-kanban-routine-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+}
+.hermes-kanban-routine-actions {
+  display: inline-flex;
+  gap: 0.2rem;
+  opacity: 0.55;
+}
+.hermes-kanban-routine-item:hover .hermes-kanban-routine-actions {
+  opacity: 1;
+}
+.hermes-kanban-routine-actions button {
+  appearance: none;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-muted-foreground);
+  border-radius: var(--radius-sm, 0.25rem);
+  min-width: 1.35rem;
+  height: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.hermes-kanban-routine-actions button:hover {
+  color: var(--color-foreground);
+  background: color-mix(in srgb, var(--color-foreground) 8%, transparent);
+}

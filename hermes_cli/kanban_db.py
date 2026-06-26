@@ -969,6 +969,38 @@ class Run:
 
 
 @dataclass
+class RoutineItem:
+    id: str
+    title: str
+    body: Optional[str]
+    frequency: str
+    sort_order: int
+    source_task_id: Optional[str]
+    active: bool
+    created_at: int
+    updated_at: int
+    checked_today: bool = False
+    checked_at: Optional[int] = None
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> "RoutineItem":
+        keys = set(row.keys())
+        return cls(
+            id=row["id"],
+            title=row["title"],
+            body=row["body"],
+            frequency=row["frequency"],
+            sort_order=int(row["sort_order"] or 0),
+            source_task_id=row["source_task_id"],
+            active=bool(row["active"]),
+            created_at=int(row["created_at"]),
+            updated_at=int(row["updated_at"]),
+            checked_today=bool(row["checked_today"]) if "checked_today" in keys else False,
+            checked_at=row["checked_at"] if "checked_at" in keys else None,
+        )
+
+
+@dataclass
 class Comment:
     id: int
     task_id: str
@@ -1074,6 +1106,26 @@ CREATE TABLE IF NOT EXISTS tasks (
     session_id           TEXT
 );
 
+CREATE TABLE IF NOT EXISTS routine_items (
+    id             TEXT PRIMARY KEY,
+    title          TEXT NOT NULL,
+    body           TEXT,
+    frequency      TEXT NOT NULL DEFAULT 'daily',
+    sort_order     INTEGER NOT NULL DEFAULT 0,
+    source_task_id TEXT,
+    active         INTEGER NOT NULL DEFAULT 1,
+    created_at     INTEGER NOT NULL,
+    updated_at     INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS routine_checks (
+    item_id    TEXT NOT NULL,
+    check_date TEXT NOT NULL,
+    checked_at INTEGER NOT NULL,
+    checked_by TEXT,
+    PRIMARY KEY (item_id, check_date)
+);
+
 CREATE TABLE IF NOT EXISTS task_links (
     parent_id  TEXT NOT NULL,
     child_id   TEXT NOT NULL,
@@ -1169,6 +1221,8 @@ CREATE INDEX IF NOT EXISTS idx_runs_task             ON task_runs(task_id, start
 CREATE INDEX IF NOT EXISTS idx_runs_status           ON task_runs(status);
 CREATE INDEX IF NOT EXISTS idx_attachments_task      ON task_attachments(task_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_notify_task           ON kanban_notify_subs(task_id);
+CREATE INDEX IF NOT EXISTS idx_routine_active_order  ON routine_items(active, sort_order, created_at);
+CREATE INDEX IF NOT EXISTS idx_routine_checks_date   ON routine_checks(check_date, item_id);
 """
 
 
@@ -2522,6 +2576,103 @@ def _find_missing_parents(conn: sqlite3.Connection, parents: Iterable[str]) -> l
     ).fetchall()
     present = {r["id"] for r in rows}
     return [p for p in parents if p not in present]
+
+
+def _new_routine_id() -> str:
+    return "r_" + secrets.token_hex(4)
+
+
+def _today_key() -> str:
+    return time.strftime("%Y-%m-%d", time.localtime())
+
+
+def list_routines(conn: sqlite3.Connection, *, include_inactive: bool = False, check_date: Optional[str] = None) -> list[RoutineItem]:
+    check_date = check_date or _today_key()
+    where = "" if include_inactive else "WHERE r.active = 1"
+    rows = conn.execute(
+        f"""
+        SELECT r.*,
+               CASE WHEN c.item_id IS NULL THEN 0 ELSE 1 END AS checked_today,
+               c.checked_at AS checked_at
+        FROM routine_items r
+        LEFT JOIN routine_checks c ON c.item_id = r.id AND c.check_date = ?
+        {where}
+        ORDER BY r.sort_order ASC, r.created_at ASC, r.id ASC
+        """,
+        (check_date,),
+    ).fetchall()
+    return [RoutineItem.from_row(r) for r in rows]
+
+
+def create_routine_item(
+    conn: sqlite3.Connection,
+    *,
+    title: str,
+    body: Optional[str] = None,
+    frequency: str = "daily",
+    sort_order: Optional[int] = None,
+    source_task_id: Optional[str] = None,
+) -> str:
+    if not title or not title.strip():
+        raise ValueError("title is required")
+    now = int(time.time())
+    rid = _new_routine_id()
+    if sort_order is None:
+        row = conn.execute(
+            "SELECT COALESCE(MAX(sort_order), 0) + 1 AS n FROM routine_items WHERE active = 1"
+        ).fetchone()
+        sort_order = int(row["n"] if row else 1)
+    with write_txn(conn):
+        conn.execute(
+            """
+            INSERT INTO routine_items (
+                id, title, body, frequency, sort_order, source_task_id,
+                active, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+            """,
+            (rid, title.strip(), body, frequency or "daily", int(sort_order), source_task_id, now, now),
+        )
+    return rid
+
+
+def set_routine_checked(
+    conn: sqlite3.Connection,
+    routine_id: str,
+    checked: bool,
+    *,
+    check_date: Optional[str] = None,
+    checked_by: Optional[str] = None,
+) -> bool:
+    check_date = check_date or _today_key()
+    now = int(time.time())
+    with write_txn(conn):
+        row = conn.execute(
+            "SELECT id FROM routine_items WHERE id = ? AND active = 1",
+            (routine_id,),
+        ).fetchone()
+        if not row:
+            return False
+        if checked:
+            conn.execute(
+                "INSERT OR REPLACE INTO routine_checks (item_id, check_date, checked_at, checked_by) VALUES (?, ?, ?, ?)",
+                (routine_id, check_date, now, checked_by),
+            )
+        else:
+            conn.execute(
+                "DELETE FROM routine_checks WHERE item_id = ? AND check_date = ?",
+                (routine_id, check_date),
+            )
+    return True
+
+
+def archive_routine_item(conn: sqlite3.Connection, routine_id: str) -> bool:
+    now = int(time.time())
+    with write_txn(conn):
+        cur = conn.execute(
+            "UPDATE routine_items SET active = 0, updated_at = ? WHERE id = ? AND active = 1",
+            (now, routine_id),
+        )
+        return cur.rowcount == 1
 
 
 def get_task(conn: sqlite3.Connection, task_id: str) -> Optional[Task]:
