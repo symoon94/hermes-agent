@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import time
+import html
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Any, Tuple, List
 
@@ -1282,6 +1283,9 @@ class SlackAdapter(BasePlatformAdapter):
                     "text": chunk,
                     "mrkdwn": True,
                 }
+                blocks = self._format_rich_text_blocks(chunk)
+                if blocks:
+                    kwargs["blocks"] = blocks
                 if thread_ts:
                     kwargs["thread_ts"] = thread_ts
                     # Only broadcast the first chunk of the first reply
@@ -1795,6 +1799,132 @@ class SlackAdapter(BasePlatformAdapter):
             text = text.replace(key, placeholders[key])
 
         return text
+
+    _SLACK_LIST_RE = re.compile(r"^(?P<indent>\s*)(?:(?P<num>\d+)[\.)]|(?P<bullet>[-*•◦]))\s+(?P<text>.+?)\s*$")
+
+    def _format_rich_text_blocks(self, formatted: str) -> Optional[List[Dict[str, Any]]]:
+        """Build Slack Block Kit rich_text blocks for native bullet lists.
+
+        Slack's ``mrkdwn`` accepts bold, links, and code, but plain ``- item``
+        lines render as literal hyphen text in bot messages.  When a response
+        contains Markdown-style list lines, send a Block Kit payload that uses
+        ``rich_text_list`` for those lines and regular mrkdwn sections for the
+        surrounding prose.  The original text is still sent as the fallback
+        ``text`` field, so clients that ignore blocks keep the old rendering.
+        """
+        if not formatted or "\n" not in formatted:
+            return None
+
+        lines = formatted.splitlines()
+        if not any(self._SLACK_LIST_RE.match(line) for line in lines):
+            return None
+
+        blocks: List[Dict[str, Any]] = []
+        paragraph: List[str] = []
+        current_list: Optional[Dict[str, Any]] = None
+
+        def flush_paragraph() -> None:
+            nonlocal paragraph
+            text = "\n".join(paragraph).strip()
+            paragraph = []
+            if not text:
+                return
+            for part in self._split_block_text(text, 2900):
+                blocks.append({
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": part},
+                })
+
+        def flush_list() -> None:
+            nonlocal current_list
+            if current_list:
+                blocks.append({"type": "rich_text", "elements": [current_list]})
+                current_list = None
+
+        in_fence = False
+        for line in lines:
+            if line.strip().startswith("```"):
+                flush_list()
+                paragraph.append(line)
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                paragraph.append(line)
+                continue
+
+            match = self._SLACK_LIST_RE.match(line)
+            if not match:
+                if not line.strip():
+                    flush_list()
+                    flush_paragraph()
+                else:
+                    flush_list()
+                    paragraph.append(line)
+                continue
+
+            flush_paragraph()
+            indent = min(len(match.group("indent") or "") // 2, 8)
+            style = "ordered" if match.group("num") else "bullet"
+            if (
+                current_list is None
+                or current_list.get("style") != style
+                or current_list.get("indent", 0) != indent
+            ):
+                flush_list()
+                current_list = {
+                    "type": "rich_text_list",
+                    "style": style,
+                    "indent": indent,
+                    "elements": [],
+                }
+            current_list["elements"].append({
+                "type": "rich_text_section",
+                "elements": self._rich_text_elements_from_mrkdwn(match.group("text")),
+            })
+
+        flush_list()
+        flush_paragraph()
+        if not blocks or len(blocks) > 50:
+            return None
+        return blocks
+
+    @staticmethod
+    def _split_block_text(text: str, limit: int) -> List[str]:
+        if len(text) <= limit:
+            return [text]
+        chunks: List[str] = []
+        remaining = text
+        while len(remaining) > limit:
+            cut = remaining.rfind("\n", 0, limit)
+            if cut <= 0:
+                cut = limit
+            chunks.append(remaining[:cut].rstrip())
+            remaining = remaining[cut:].lstrip("\n")
+        if remaining:
+            chunks.append(remaining)
+        return chunks
+
+    @staticmethod
+    def _rich_text_elements_from_mrkdwn(text: str) -> List[Dict[str, Any]]:
+        """Convert a small Slack-mrkdwn subset to rich_text section elements."""
+        elements: List[Dict[str, Any]] = []
+        i = 0
+        pattern = re.compile(r"`([^`]+)`|\*([^*\n]+)\*|<((?:https?|mailto):[^>|]+)\|([^>]+)>|<((?:https?|mailto):[^>]+)>")
+        for match in pattern.finditer(text):
+            if match.start() > i:
+                elements.append({"type": "text", "text": html.unescape(text[i:match.start()])})
+            if match.group(1) is not None:
+                elements.append({"type": "text", "text": html.unescape(match.group(1)), "style": {"code": True}})
+            elif match.group(2) is not None:
+                elements.append({"type": "text", "text": html.unescape(match.group(2)), "style": {"bold": True}})
+            elif match.group(3) is not None:
+                elements.append({"type": "link", "url": html.unescape(match.group(3)), "text": html.unescape(match.group(4))})
+            elif match.group(5) is not None:
+                elements.append({"type": "link", "url": html.unescape(match.group(5))})
+            i = match.end()
+        if i < len(text):
+            elements.append({"type": "text", "text": html.unescape(text[i:])})
+        return elements or [{"type": "text", "text": " "}]
 
     # ----- Reactions -----
 

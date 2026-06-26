@@ -2380,6 +2380,43 @@ class TestFormatMessage:
         assert "item one" in result
         assert "item two" in result
 
+    def test_rich_text_blocks_for_markdown_bullets(self, adapter):
+        """Markdown bullets are emitted as Slack-native rich_text lists."""
+        formatted = adapter.format_message("*Status*\n- one\n- **two**\n\nDone")
+        blocks = adapter._format_rich_text_blocks(formatted)
+
+        assert blocks[0]["type"] == "section"
+        assert blocks[1]["type"] == "rich_text"
+        list_el = blocks[1]["elements"][0]
+        assert list_el["type"] == "rich_text_list"
+        assert list_el["style"] == "bullet"
+        assert list_el["elements"][0]["elements"][0]["text"] == "one"
+        assert list_el["elements"][1]["elements"][0] == {
+            "type": "text",
+            "text": "two",
+            "style": {"bold": True},
+        }
+        assert blocks[2]["type"] == "section"
+
+    def test_rich_text_blocks_for_ordered_list(self, adapter):
+        formatted = adapter.format_message("1. first\n2. second")
+        blocks = adapter._format_rich_text_blocks(formatted)
+
+        assert blocks[0]["elements"][0]["style"] == "ordered"
+        assert blocks[0]["elements"][0]["elements"][1]["elements"][0]["text"] == "second"
+
+    @pytest.mark.asyncio
+    async def test_send_includes_blocks_for_bullet_message(self, adapter):
+        adapter._app.client.chat_postMessage = AsyncMock(return_value={"ts": "123.456"})
+
+        result = await adapter.send("C123", "Here:\n- one\n- two")
+
+        assert result.success
+        kwargs = adapter._app.client.chat_postMessage.await_args.kwargs
+        assert kwargs["text"] == "Here:\n- one\n- two"
+        assert kwargs["mrkdwn"] is True
+        assert kwargs["blocks"][1]["elements"][0]["style"] == "bullet"
+
     def test_nested_bold_in_link(self, adapter):
         """Bold inside link label — label is stashed before bold pass."""
         result = adapter.format_message("[**bold**](https://example.com)")
