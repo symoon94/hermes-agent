@@ -4989,6 +4989,27 @@
         }, teamBusy ? "Planning…" : "👥 Plan AI team")
       : null;
 
+    const teamButton = (task.status === "triage" && props.onAssembleTeam)
+      ? h(Button, {
+          onClick: function () {
+            if (teamBusy) return;
+            setTeamBusy(true); setTeamMsg(null);
+            props.onAssembleTeam().then(function (res) {
+              if (res && res.ok) {
+                const n = (res.roles || []).length;
+                setTeamMsg({ ok: true, text: `Team assembled: ${res.mode || "solo"}${n ? ` (${n} roles)` : ""}` });
+              } else {
+                setTeamMsg({ ok: false, text: "Team assembly failed: " + ((res && res.reason) || "unknown error") });
+              }
+            }).catch(function (err) {
+              setTeamMsg({ ok: false, text: "Team assembly failed: " + (err.message || String(err)) });
+            }).then(function () { setTeamBusy(false); });
+          },
+          disabled: teamBusy,
+          size: "sm",
+        }, teamBusy ? "Assembling…" : "👥 Assemble team")
+      : null;
+
     // "Decompose" is the built-in decomposer fan-out. Like Specify, only
     // makes sense on triage-column tasks — elsewhere the backend short-
     // circuits with ok:false. When the decomposer returns fanout:false
