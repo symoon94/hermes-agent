@@ -32,6 +32,8 @@ UPSTAGE_HINTS = (
 PRIVATE_HINTS = (
     "personal", "private", "개인", "영어", "english", "이력서", "resume",
     "interview", "면접", "창업", "startup", "사이드프로젝트", "학습", "가족",
+    "여행", "쉼", "휴식", "건강", "운동", "즐기", "big tech", "빅테크",
+    "overseas", "해외", "global", "글로벌",
 )
 TIER1_HINTS = (
     "매출", "상장", "revenue", "sales", "고객 장애", "prod outage",
@@ -43,6 +45,8 @@ TIER2_HINTS = (
     "portal", "manual", "매뉴얼", "release", "릴리스", "workflow",
     "워크플로우", "raci", "migration", "마이그레이션", "자동화", "automation",
     "팀", "team", "제품", "product", "고객", "partner", "파트너",
+    "big tech", "빅테크", "overseas", "해외", "global", "글로벌",
+    "resume", "이력서", "interview", "면접", "portfolio", "포트폴리오",
 )
 TIER3_HINTS = (
     "study", "studying", "learn", "learning", "research", "til",
@@ -200,6 +204,10 @@ def decide_priority(conn: Any, *, title: str, body: Optional[str], tenant: Optio
             "- T2: career/startup leverage, product lifecycle, team/process/system design, release/migration work.\n"
             "- T3: learning, documentation, knowledge transfer, personal growth/routines.\n"
             "- T4: reject/defer/someday candidates.\n"
+            "Current personal value updates to weigh explicitly:\n"
+            "- Strong desire to enjoy life, not optimize everything into obligation. Tasks that preserve energy, relationships, health, or daily enjoyment can outrank pure productivity chores.\n"
+            "- Strong desire to work at an overseas big-tech company at least once. Tasks that build credible global-big-tech/FDE/product-engineering readiness, English communication, resume/portfolio, interview loops, or high-signal career options should rank higher.\n"
+            "- Automation is intrinsically fun/energizing. Automation tasks get a positive boost when they also reduce repeated toil, improve team leverage, or create reusable agent/system capability.\n"
             "Within a tier compare actual impact, deadlines, dependencies, reversibility, and whether the task unblocks other people.\n"
             "Return ONLY JSON with keys: insert_before_id (task id string or null), tier (1-4), realm ('Upstage'|'Private'|null), reason (short Korean).\n"
             "If the new card belongs at the end of the ranked list, use insert_before_id:null.\n\n"
