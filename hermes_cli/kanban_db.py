@@ -2250,7 +2250,7 @@ def create_task(
     workspace_path: Optional[str] = None,
     branch_name: Optional[str] = None,
     tenant: Optional[str] = None,
-    priority: int = 0,
+    priority: Optional[int] = None,
     parents: Iterable[str] = (),
     triage: bool = False,
     idempotency_key: Optional[str] = None,
@@ -2366,6 +2366,20 @@ def create_task(
 
     now = int(time.time())
 
+    auto_priority_decision = None
+    if priority is None:
+        from hermes_cli import kanban_priority
+
+        auto_priority_decision = kanban_priority.decide_priority(
+            conn,
+            title=title.strip(),
+            body=body,
+            tenant=tenant,
+        )
+        insert_priority = int(auto_priority_decision.priority)
+    else:
+        insert_priority = int(priority)
+
     # Resolve workspace_path from board-level default_workdir when the
     # caller did not specify one explicitly. Board defaults represent
     # persistent project checkouts, so only persistent workspace kinds may
@@ -2419,6 +2433,11 @@ def create_task(
                     if missing:
                         raise ValueError(f"unknown parent task(s): {', '.join(missing)}")
 
+                if auto_priority_decision is not None and insert_priority > 0:
+                    from hermes_cli import kanban_priority
+
+                    kanban_priority.shift_for_insert(conn, insert_priority)
+
                 conn.execute(
                     """
                     INSERT INTO tasks (
@@ -2434,7 +2453,7 @@ def create_task(
                         body,
                         assignee,
                         task_status,
-                        priority,
+                        insert_priority,
                         created_by,
                         now,
                         workspace_kind,
@@ -2469,6 +2488,20 @@ def create_task(
                         "goal_mode": bool(goal_mode) or None,
                     },
                 )
+                if auto_priority_decision is not None:
+                    _append_event(
+                        conn,
+                        task_id,
+                        "auto_prioritized",
+                        {
+                            "priority": insert_priority,
+                            "insert_before_id": auto_priority_decision.insert_before_id,
+                            "tier": auto_priority_decision.tier,
+                            "realm": auto_priority_decision.realm,
+                            "source": auto_priority_decision.source,
+                            "reason": auto_priority_decision.reason,
+                        },
+                    )
             return task_id
         except sqlite3.IntegrityError:
             if attempt == 1:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import json
 import os
 import sqlite3
 import subprocess
@@ -1543,7 +1544,7 @@ def test_list_tasks_order_by(kanban_home):
 
         # Unranked/default priority 0 stays last so newly captured cards do
         # not jump ahead of an explicitly ranked priority list.
-        t_unranked = kb.create_task(conn, title="unranked")
+        t_unranked = kb.create_task(conn, title="unranked", priority=0)
         default = kb.list_tasks(conn)
         assert [t.id for t in default] == [t_a, t_c, t_b, t_unranked]
 
@@ -1567,6 +1568,37 @@ def test_list_tasks_order_by(kanban_home):
             assert False, "Should have raised ValueError"
         except ValueError as e:
             assert "order_by must be one of" in str(e)
+
+
+def test_create_task_auto_prioritizes_and_shifts_existing_rows(kanban_home, monkeypatch):
+    import hermes_cli.kanban_priority as kanban_priority
+
+    class Decision:
+        priority = 2
+        reason = "insert before lower-impact task"
+        insert_before_id = None
+        tier = 2
+        realm = "Upstage"
+        source = "test"
+
+    monkeypatch.setattr(
+        kanban_priority,
+        "decide_priority",
+        lambda conn, **kwargs: Decision(),
+    )
+    with kb.connect() as conn:
+        top = kb.create_task(conn, title="top", priority=1)
+        lower = kb.create_task(conn, title="lower", priority=2)
+        new = kb.create_task(conn, title="new value-aware task")
+        tasks = kb.list_tasks(conn)
+        assert [t.id for t in tasks] == [top, new, lower]
+        assert [t.priority for t in tasks] == [1, 2, 3]
+        events = kb.list_events(conn, new)
+        auto = [e for e in events if e.kind == "auto_prioritized"]
+        assert auto
+        payload = auto[-1].payload or {}
+        assert payload["priority"] == 2
+        assert payload["source"] == "test"
 
 def test_delete_task_removes_task_and_cascades(kanban_home):
     with kb.connect() as conn:

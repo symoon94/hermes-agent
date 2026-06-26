@@ -2804,7 +2804,7 @@
     const { t } = useI18n();
     const [title, setTitle] = useState("");
     const [assignee, setAssignee] = useState("");
-    const [priority, setPriority] = useState(0);
+    const [priority, setPriority] = useState("");
     const [parent, setParent] = useState("");
     const [skills, setSkills] = useState("");
     // Workspace controls. `scratch` (default) ignores path; `worktree` optionally
@@ -2827,9 +2827,9 @@
       const body = {
         title: trimmed,
         assignee: assignee.trim() || null,
-        priority: Number(priority) || 0,
         triage: props.columnName === "triage",
       };
+      if (String(priority).trim() !== "") body.priority = Number(priority) || 0;
       if (parent) body.parents = [parent];
       // Parse comma-separated skills into a clean list. Blank = no
       // extras (omit key so backend leaves it null). The dispatcher
@@ -2854,7 +2854,7 @@
         if (Number.isFinite(gmt) && gmt > 0) body.goal_max_turns = gmt;
       }
       props.onSubmit(body);
-      setTitle(""); setAssignee(""); setPriority(0); setParent(""); setSkills("");
+      setTitle(""); setAssignee(""); setPriority(""); setParent(""); setSkills("");
       setWorkspaceKind("scratch"); setWorkspacePath("");
       setGoalMode(false); setGoalMaxTurns("");
     };
@@ -2902,7 +2902,7 @@
           onChange: function (e) { setPriority(e.target.value); },
           placeholder: "pri",
           className: "h-7 text-xs w-16",
-          title: "Priority. Lower numbers are higher priority; 1 = top, 0 = unranked/last.",
+          title: "Priority. Lower numbers are higher priority; 1 = top, 0 = unranked/last. Leave blank to auto-rank from the task text.",
         }),
       ),
       h(Input, {
