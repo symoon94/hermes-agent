@@ -1537,13 +1537,19 @@ def test_list_tasks_order_by(kanban_home):
         t_b = kb.create_task(conn, title="beta", priority=2)
         t_c = kb.create_task(conn, title="gamma", priority=1)
 
-        # Default sort: priority DESC, created ASC
+        # Default sort: Luna-style priority ASC, created ASC (1 = top)
         default = kb.list_tasks(conn)
-        assert [t.id for t in default] == [t_b, t_a, t_c]
+        assert [t.id for t in default] == [t_a, t_c, t_b]
+
+        # Unranked/default priority 0 stays last so newly captured cards do
+        # not jump ahead of an explicitly ranked priority list.
+        t_unranked = kb.create_task(conn, title="unranked")
+        default = kb.list_tasks(conn)
+        assert [t.id for t in default] == [t_a, t_c, t_b, t_unranked]
 
         # Sort by title ASC
         by_title = kb.list_tasks(conn, order_by="title")
-        assert [t.id for t in by_title] == [t_a, t_b, t_c]
+        assert [t.id for t in by_title] == [t_a, t_b, t_c, t_unranked]
 
         # Sort by assignee
         kb.assign_task(conn, t_a, "alice")

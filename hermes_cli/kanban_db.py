@@ -2501,8 +2501,12 @@ def get_task(conn: sqlite3.Connection, task_id: str) -> Optional[Task]:
 VALID_SORT_ORDERS: dict[str, str] = {
     "created": "created_at ASC, id ASC",
     "created-desc": "created_at DESC, id DESC",
-    "priority": "priority DESC, created_at ASC",
-    "priority-desc": "priority ASC, created_at ASC",
+    # Priority follows Luna-style operator semantics: lower numbers are
+    # more important (1 = top).  Keep unranked/default 0 cards last so a
+    # new unprioritized card does not jump ahead of an explicitly ranked
+    # backlog.
+    "priority": "CASE WHEN priority IS NULL OR priority = 0 THEN 1 ELSE 0 END, priority ASC, created_at ASC",
+    "priority-desc": "CASE WHEN priority IS NULL OR priority = 0 THEN 1 ELSE 0 END, priority DESC, created_at ASC",
     "status": "status ASC, created_at ASC",
     "assignee": "assignee ASC, created_at ASC",
     "title": "title ASC, id ASC",
@@ -2555,7 +2559,7 @@ def list_tasks(
             )
         query += f" ORDER BY {VALID_SORT_ORDERS[order_by]}"
     else:
-        query += " ORDER BY priority DESC, created_at ASC"
+        query += " ORDER BY CASE WHEN priority IS NULL OR priority = 0 THEN 1 ELSE 0 END, priority ASC, created_at ASC"
     if limit:
         query += f" LIMIT {int(limit)}"
     rows = conn.execute(query, params).fetchall()
