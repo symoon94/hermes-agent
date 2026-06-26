@@ -3442,6 +3442,137 @@
     return (n / (1024 * 1024)).toFixed(1) + " MB";
   }
 
+  function cleanExternalUrl(raw) {
+    if (!raw) return "";
+    let u = String(raw).trim();
+    // Trim punctuation commonly captured when URLs sit inside prose/Markdown.
+    u = u.replace(/[\n\r\t]+/g, "");
+    u = u.replace(/[\]})>,.;:'"`]+$/g, "");
+    u = u.replace(/^[({\[<'"`]+/g, "");
+    if (!/^https?:\/\//i.test(u)) return "";
+    if (/^https?:\/\/<[^>]+>/i.test(u)) return "";
+    return u;
+  }
+
+  function classifyExternalLink(url) {
+    let host = "";
+    let path = "";
+    try {
+      const parsed = new URL(url);
+      host = parsed.hostname.toLowerCase();
+      path = parsed.pathname || "";
+    } catch (_e) {}
+    if (host.includes("github.com")) {
+      const m = /\/([^\/]+)\/([^\/]+)\/pull\/(\d+)/i.exec(path);
+      if (m) {
+        const hasComment = /issuecomment-/i.test(url);
+        return {
+          kind: hasComment ? "GitHub comment" : "GitHub PR",
+          label: `${m[1]}/${m[2]} #${m[3]}${hasComment ? " comment" : ""}`,
+        };
+      }
+      const issue = /\/([^\/]+)\/([^\/]+)\/issues\/(\d+)/i.exec(path);
+      if (issue) return { kind: "GitHub issue", label: `${issue[1]}/${issue[2]} #${issue[3]}` };
+      return { kind: "GitHub", label: host.replace(/^www\./, "") };
+    }
+    if (host.includes("atlassian.net") || host.includes("jira")) {
+      const m = /\/browse\/([A-Z][A-Z0-9]+-\d+)/i.exec(path);
+      return { kind: "Jira", label: m ? m[1] : "Jira" };
+    }
+    if (host.includes("slack.com")) return { kind: "Slack", label: "Slack thread" };
+    if (host.includes("notion.")) return { kind: "Notion", label: "Notion" };
+    return { kind: "Link", label: host.replace(/^www\./, "") || url };
+  }
+
+  function collectTextFragments(value, out, depth) {
+    if (value == null || depth > 4) return;
+    if (typeof value === "string") {
+      out.push(value);
+      return;
+    }
+    if (typeof value === "number" || typeof value === "boolean") return;
+    if (Array.isArray(value)) {
+      value.forEach(function (v) { collectTextFragments(v, out, depth + 1); });
+      return;
+    }
+    if (typeof value === "object") {
+      Object.keys(value).forEach(function (k) { collectTextFragments(value[k], out, depth + 1); });
+    }
+  }
+
+  function collectRelatedLinks(data) {
+    if (!data || !data.task) return [];
+    const texts = [];
+    const task = data.task || {};
+    collectTextFragments(task.title, texts, 0);
+    collectTextFragments(task.body, texts, 0);
+    collectTextFragments(task.result, texts, 0);
+    collectTextFragments(task.latest_summary, texts, 0);
+    (data.comments || []).forEach(function (c) { collectTextFragments(c.body, texts, 0); });
+    (data.events || []).forEach(function (e) { collectTextFragments(e.payload, texts, 0); });
+    (data.runs || []).forEach(function (r) {
+      collectTextFragments(r.summary, texts, 0);
+      collectTextFragments(r.metadata, texts, 0);
+      collectTextFragments(r.error, texts, 0);
+    });
+    const seen = new Set();
+    const links = [];
+    const re = /https?:\/\/[^\s<>()\[\]{}"']+/ig;
+    const joined = texts.join("\n");
+    joined.replace(re, function (raw) {
+      const url = cleanExternalUrl(raw);
+      if (!url || seen.has(url)) return raw;
+      seen.add(url);
+      const info = classifyExternalLink(url);
+      links.push(Object.assign({ url: url }, info));
+      return raw;
+    });
+    // Jira references often arrive from migrated Luna tickets as bare keys
+    // (AIPACK-682) rather than full https://.../browse/AIPACK-682 URLs.
+    // Surface those as first-class chips too, but keep this intentionally
+    // scoped to known work trackers so code locations like L407-411 don't
+    // become bogus Jira links.
+    const jiraKeyRe = /\b(AIPACKV?|SBOX)-\d+\b/g;
+    joined.replace(jiraKeyRe, function (key) {
+      const upper = key.toUpperCase();
+      const url = `https://agi4work.atlassian.net/browse/${upper}`;
+      if (seen.has(url)) return key;
+      seen.add(url);
+      links.push({ url: url, kind: "Jira", label: upper });
+      return key;
+    });
+    links.sort(function (a, b) {
+      const order = { "Jira": 0, "GitHub PR": 1, "GitHub comment": 2, "GitHub issue": 3, "Slack": 4, "Notion": 5, "GitHub": 6, "Link": 7 };
+      const ao = Object.prototype.hasOwnProperty.call(order, a.kind) ? order[a.kind] : 9;
+      const bo = Object.prototype.hasOwnProperty.call(order, b.kind) ? order[b.kind] : 9;
+      return ao - bo || a.label.localeCompare(b.label) || a.url.localeCompare(b.url);
+    });
+    return links;
+  }
+
+  function RelatedLinksSection(props) {
+    const links = collectRelatedLinks(props.data);
+    if (!links.length) return null;
+    return h("div", { className: "hermes-kanban-section hermes-kanban-related-links" },
+      h("div", { className: "hermes-kanban-section-head" }, `Related links (${links.length})`),
+      h("div", { className: "hermes-kanban-related-link-list" },
+        links.map(function (link) {
+          return h("a", {
+            key: link.url,
+            href: link.url,
+            target: "_blank",
+            rel: "noopener noreferrer",
+            className: "hermes-kanban-related-link",
+            title: link.url,
+          },
+            h("span", { className: "hermes-kanban-related-kind" }, link.kind),
+            h("span", { className: "hermes-kanban-related-label" }, link.label),
+          );
+        }),
+      ),
+    );
+  }
+
   // Attachments section in the task drawer (#35338). Upload button +
   // list with download links and a delete (×) per row. The download
   // link hits GET /attachments/:id which streams the file; the worker
@@ -3595,6 +3726,7 @@
         onDecompose: props.onDecompose,
         onAssembleTeam: props.onAssembleTeam,
       }),
+      h(RelatedLinksSection, { data: props.data }),
       h(TeamAssemblyPanel, { task: t, comments }),
       h(ClarifyPanel, {
         task: t,

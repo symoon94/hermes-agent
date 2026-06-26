@@ -1914,3 +1914,42 @@
   color: var(--color-foreground);
   background: color-mix(in srgb, var(--color-foreground) 8%, transparent);
 }
+
+/* External/Jira/GitHub links surfaced in task drawer. */
+.hermes-kanban-related-link-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.hermes-kanban-related-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 0.22rem 0.55rem;
+  background: color-mix(in srgb, var(--color-background) 50%, transparent);
+  color: var(--color-foreground);
+  text-decoration: none;
+  font-size: 0.76rem;
+}
+.hermes-kanban-related-link:hover {
+  border-color: var(--color-ring);
+  background: color-mix(in srgb, var(--color-ring) 9%, var(--color-card));
+  text-decoration: none;
+}
+.hermes-kanban-related-kind {
+  color: var(--color-muted-foreground);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.hermes-kanban-related-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
