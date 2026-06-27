@@ -2370,7 +2370,6 @@
         h(Input, {
           type: "number",
           value: priority,
-          disabled: submitting,
           onChange: function (e) { setPriority(e.target.value); },
           placeholder: tx(t, "priority", "pri"),
           className: "h-7 text-xs w-16",
