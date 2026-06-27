@@ -979,20 +979,30 @@
   background: color-mix(in srgb, var(--color-foreground) 8%, transparent);
 }
 .hermes-kanban-bulk-reassign {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.45rem;
   padding: 0.35rem 0.5rem;
   border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
   border-radius: var(--radius-sm, 0.25rem);
   background: color-mix(in srgb, var(--color-card) 72%, transparent);
-  min-width: 0;
+  box-sizing: border-box;
+  min-width: min(100%, 14rem);
   max-width: 100%;
-  flex: 0 1 auto;
+  flex: 1 1 16rem;
+}
+.hermes-kanban-bulk-reassign > * {
+  min-width: 0;
+}
+.hermes-kanban-bulk-reassign > button {
+  white-space: nowrap;
 }
 .hermes-kanban-bulk-reassign-select {
-  width: 10.5rem !important;
-  max-width: min(10.5rem, 48vw) !important;
+  box-sizing: border-box;
+  min-width: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
 }
 
 /* ---- Dependency editor chips --------------------------------------- */
@@ -1914,7 +1924,8 @@
     padding: 0.35rem 0.45rem;
   }
   .hermes-kanban-bulk-reassign-select {
-    width: 8.75rem !important;
+    width: 100% !important;
+    max-width: 100% !important;
   }
 }
 
