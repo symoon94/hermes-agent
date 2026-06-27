@@ -982,15 +982,15 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
-  gap: 0.35rem;
-  padding: 0.3rem 0.4rem;
+  gap: 0.45rem;
+  padding: 0.35rem 0.5rem;
   border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
   border-radius: var(--radius-sm, 0.25rem);
   background: color-mix(in srgb, var(--color-card) 72%, transparent);
   box-sizing: border-box;
-  min-width: min(100%, 11.5rem);
-  max-width: min(100%, 13.5rem);
-  flex: 0 1 13.5rem;
+  min-width: min(100%, 14rem);
+  max-width: 100%;
+  flex: 1 1 16rem;
 }
 .hermes-kanban-bulk-reassign > * {
   min-width: 0;
@@ -1003,13 +1003,6 @@
   min-width: 0 !important;
   width: 100% !important;
   max-width: 100% !important;
-}
-.hermes-kanban-bulk-reassign-select [role="combobox"] {
-  min-width: 0 !important;
-  width: 100% !important;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .hermes-kanban-bulk-reassign-select:has([role="listbox"]) {
   height: auto !important;
