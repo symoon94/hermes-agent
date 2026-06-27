@@ -279,6 +279,8 @@
 }
 
 .hermes-kanban-priority-pill {
+  font-family: ui-rounded, "SF Pro Rounded", "Pretendard Variable", Pretendard, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+  font-variant-numeric: tabular-nums;
   color: var(--color-foreground);
   font-weight: 700;
 }
@@ -501,9 +503,11 @@
 }
 
 .hermes-kanban-priority {
+  font-family: ui-rounded, "SF Pro Rounded", "Pretendard Variable", Pretendard, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+  font-variant-numeric: tabular-nums;
   font-size: 0.72rem !important;
   font-weight: 800 !important;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.01em;
   line-height: 1 !important;
   padding: 0.18rem 0.42rem !important;
   background: color-mix(in srgb, var(--color-ring) 32%, var(--color-card));
