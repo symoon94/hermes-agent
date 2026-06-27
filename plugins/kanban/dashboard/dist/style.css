@@ -981,7 +981,7 @@
 .hermes-kanban-bulk-reassign {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
+  align-items: start;
   gap: 0.45rem;
   padding: 0.35rem 0.5rem;
   border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
@@ -1003,6 +1003,18 @@
   min-width: 0 !important;
   width: 100% !important;
   max-width: 100% !important;
+}
+.hermes-kanban-bulk-reassign-select:has([role="listbox"]) {
+  height: auto !important;
+  min-height: 1.75rem !important;
+}
+.hermes-kanban-bulk-reassign-select [role="listbox"] {
+  position: static !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  max-height: 10rem !important;
+  margin-top: 0.35rem !important;
 }
 
 /* ---- Dependency editor chips --------------------------------------- */
