@@ -2370,6 +2370,7 @@
         h(Input, {
           type: "number",
           value: priority,
+          disabled: submitting,
           onChange: function (e) { setPriority(e.target.value); },
           placeholder: tx(t, "priority", "pri"),
           className: "h-7 text-xs w-16",
@@ -3000,10 +3001,17 @@
     // = backend default.
     const [goalMode, setGoalMode] = useState(false);
     const [goalMaxTurns, setGoalMaxTurns] = useState("");
+    const [submitting, setSubmitting] = useState(false);
+
+    const resetForm = function () {
+      setTitle(""); setAssignee(""); setPriority(""); setParent(""); setSkills("");
+      setWorkspaceKind("scratch"); setWorkspacePath("");
+      setGoalMode(false); setGoalMaxTurns("");
+    };
 
     const submit = function () {
       const trimmed = title.trim();
-      if (!trimmed) return;
+      if (!trimmed || submitting) return;
       const body = {
         title: trimmed,
         assignee: assignee.trim() || null,
@@ -3033,10 +3041,11 @@
         const gmt = parseInt(goalMaxTurns, 10);
         if (Number.isFinite(gmt) && gmt > 0) body.goal_max_turns = gmt;
       }
-      props.onSubmit(body);
-      setTitle(""); setAssignee(""); setPriority(""); setParent(""); setSkills("");
-      setWorkspaceKind("scratch"); setWorkspacePath("");
-      setGoalMode(false); setGoalMaxTurns("");
+      setSubmitting(true);
+      Promise.resolve(props.onSubmit(body))
+        .then(function () { resetForm(); })
+        .catch(function (e) { window.alert(String((e && e.message) || e || "Create failed")); })
+        .finally(function () { setSubmitting(false); });
     };
 
     const showPathInput = workspaceKind !== "scratch";
@@ -3048,6 +3057,7 @@
     return h("div", { className: "hermes-kanban-inline-create" },
       h("textarea", {
         value: title,
+        disabled: submitting,
         onChange: function (e) { setTitle(e.target.value); },
         onKeyDown: function (e) {
           if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
@@ -3057,12 +3067,13 @@
           ? tx(t, "triagePlaceholder", "Rough idea — AI will spec it…")
           : tx(t, "taskTitlePlaceholder", "New task title…"),
         autoFocus: true,
-        className: "text-sm min-h-[2rem] max-h-32 resize-y w-full border border-input bg-transparent px-2 py-1 rounded-md focus:outline-none focus:ring-2 focus:ring-ring",
+        className: "hermes-kanban-inline-textarea text-sm min-h-[2rem] max-h-32 resize-y w-full border border-input bg-transparent px-2 py-1 rounded-md focus:outline-none focus:ring-2 focus:ring-ring",
         rows: 2,
       }),
-      h("div", { className: "flex gap-2" },
+      h("div", { className: "hermes-kanban-inline-row hermes-kanban-inline-row--assignee" },
         h(Input, {
           value: assignee,
+          disabled: submitting,
           onChange: function (e) { setAssignee(e.target.value); },
           placeholder: props.columnName === "triage"
             ? tx(t, "specifier", "specifier")
@@ -3087,13 +3098,14 @@
       ),
       h(Input, {
         value: skills,
+        disabled: submitting,
         onChange: function (e) { setSkills(e.target.value); },
         placeholder: tx(t, "skillsPlaceholder",
           "skills (optional, comma-separated): translation, github-code-review"),
         title: "Force-load these skills into the worker (in addition to the built-in kanban-worker).",
         className: "h-7 text-xs",
       }),
-      h("div", { className: "flex gap-2 items-center" },
+      h("div", { className: "hermes-kanban-inline-row hermes-kanban-inline-row--goal" },
         h("label", {
           className: "flex items-center gap-1.5 text-xs cursor-pointer select-none",
           title: "Goal mode: the worker keeps going in the same session until a judge agrees the card is done (or the turn budget runs out, which blocks it for review). Best for open-ended cards one shot rarely finishes.",
@@ -3101,6 +3113,7 @@
           h("input", {
             type: "checkbox",
             checked: goalMode,
+            disabled: submitting,
             onChange: function (e) { setGoalMode(!!e.target.checked); },
             className: "h-3.5 w-3.5 accent-current",
           }),
@@ -3109,6 +3122,7 @@
         goalMode ? h(Input, {
           type: "number",
           value: goalMaxTurns,
+          disabled: submitting,
           onChange: function (e) { setGoalMaxTurns(e.target.value); },
           placeholder: tx(t, "goalMaxTurns", "max turns (default 20)"),
           className: "h-7 text-xs w-40",
@@ -3116,9 +3130,10 @@
           min: 1,
         }) : null,
       ),
-      h("div", { className: "flex gap-2" },
+      h("div", { className: "hermes-kanban-inline-row hermes-kanban-inline-row--workspace" },
         h(Select, Object.assign({
           value: workspaceKind,
+          disabled: submitting,
           title: "scratch: isolated temp dir (default). worktree: git worktree on the assignee profile. dir: exact path (required below).",
           className: "h-7 text-xs w-28",
         }, selectChangeHandler(setWorkspaceKind)),
@@ -3128,6 +3143,7 @@
         ),
         showPathInput ? h(Input, {
           value: workspacePath,
+          disabled: submitting,
           onChange: function (e) { setWorkspacePath(e.target.value); },
           placeholder: pathPlaceholder,
           className: "h-7 text-xs flex-1",
@@ -3135,7 +3151,8 @@
       ),
       h(Select, Object.assign({
         value: parent,
-        className: "h-7 text-xs",
+        disabled: submitting,
+        className: "h-7 text-xs hermes-kanban-inline-parent",
         title: "Optional parent task. A child stays blocked in its current column until the parent is marked done.",
       }, selectChangeHandler(setParent)),
         h(SelectOption, { value: "" }, tx(t, "noParent", "— no parent —")),
@@ -3144,13 +3161,15 @@
             `${task.id} — ${(task.title || "").slice(0, 50)}`);
         }),
       ),
-      h("div", { className: "flex gap-2" },
+      h("div", { className: "hermes-kanban-inline-actions" },
         h(Button, {
           onClick: submit,
+          disabled: submitting || !title.trim(),
           size: "sm",
-        }, "Create"),
+        }, submitting ? "Creating…" : "Create"),
         h(Button, {
           onClick: props.onCancel,
+          disabled: submitting,
           size: "sm",
         }, tx(t, "cancel", "Cancel")),
       ),
