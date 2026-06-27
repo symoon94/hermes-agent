@@ -537,6 +537,7 @@
       try { return window.localStorage.getItem("hermes.kanban.viewMode") || "board"; }
       catch (_e) { return "board"; }
     });
+    const [showGlobalCreate, setShowGlobalCreate] = useState(false);
     const [laneByProfile, setLaneByProfile] = useState(true);
     const [configApplied, setConfigApplied] = useState(false);
 
@@ -544,6 +545,7 @@
     const [selectedIds, setSelectedIds] = useState(() => new Set());
     const [lastSelectedId, setLastSelectedId] = useState(null);
     const [failedIds, setFailedIds] = useState(() => new Set());
+    const [routineNotice, setRoutineNotice] = useState(null);
     const [draggingTaskId, setDraggingTaskId] = useState(null);
     const handleDragStart = useCallback(function (taskId) { setDraggingTaskId(taskId); }, []);
     const handleDragEnd = useCallback(function () { setDraggingTaskId(null); }, []);
@@ -848,10 +850,25 @@
     }, [loadBoard, board]);
 
     const promoteRoutine = useCallback(function (routine) {
+      setRoutineNotice({ id: routine.id, status: "busy", text: `Promoting “${routine.title}”…` });
       return createTask({
         title: routine.title,
         body: routine.body || `Promoted from routine ${routine.id}.`,
         triage: true,
+      }).then(function (res) {
+        const taskId = res && res.id ? ` (${res.id})` : "";
+        setRoutineNotice({ id: routine.id, status: "ok", text: `Created triage task${taskId}` });
+        window.setTimeout(function () {
+          setRoutineNotice(function (cur) { return cur && cur.id === routine.id ? null : cur; });
+        }, 4500);
+        return res;
+      }).catch(function (err) {
+        setRoutineNotice({
+          id: routine.id,
+          status: "err",
+          text: `Promote failed: ${err && err.message ? err.message : String(err)}`,
+        });
+        throw err;
       });
     }, [createTask]);
 
@@ -1023,7 +1040,7 @@
 
    const deleteTask = useCallback(function (taskId) {
      if (!window.confirm(tx(t, "trash.confirm", FALLBACK_TRASH.confirm))) return Promise.resolve();
-     return SDK.fetchJSON(`${API}/tasks/${encodeURIComponent(taskId)}`, {
+     return SDK.fetchJSON(withBoard(`${API}/tasks/${encodeURIComponent(taskId)}`, board), {
        method: "DELETE",
      }).then(function () {
        loadBoard();
@@ -1088,7 +1105,8 @@
           onOpen: setSelectedTaskId,
         }),
         h(RoutinePanel, {
-          routines: (boardData && boardData.routines) || [],
+          routines: boardData.routines || [],
+          promoteState: routineNotice,
           onCreate: createRoutine,
           onToggle: toggleRoutine,
           onArchive: archiveRoutine,
@@ -1106,6 +1124,8 @@
             try { window.localStorage.setItem("hermes.kanban.viewMode", next); } catch (_e) {}
           },
           search, setSearch,
+          onNewTaskClick: function () { setShowGlobalCreate(function (v) { return !v; }); },
+          showGlobalCreate,
           onNudgeDispatch: function () {
             SDK.fetchJSON(withBoard(`${API}/dispatch?max=8`, board), { method: "POST" })
               .then(loadBoard)
@@ -1113,6 +1133,32 @@
           },
           onRefresh: loadBoard,
         }),
+        showGlobalCreate ? h("div", { className: "hermes-kanban-global-create" },
+          h("div", { className: "hermes-kanban-global-create-head" },
+            h("div", null,
+              h("div", { className: "hermes-kanban-global-create-title" }, "+ Add task / AI triage"),
+              h("div", { className: "hermes-kanban-global-create-help" },
+                "Write a rough idea. Hermes will create a triage task, auto-rank it if priority is blank, and you can run Ask AI to refine spec next."),
+            ),
+            h("button", {
+              type: "button",
+              className: "hermes-kanban-global-create-close",
+              onClick: function () { setShowGlobalCreate(false); },
+              title: "Close add task form",
+            }, "×"),
+          ),
+          h(InlineCreate, {
+            columnName: "triage",
+            allTasks: boardData.columns.reduce(function (acc, c) { return acc.concat(c.tasks); }, []),
+            onSubmit: function (body) {
+              return createTask(Object.assign({}, body, { triage: true })).then(function (res) {
+                setShowGlobalCreate(false);
+                if (res && res.id) setSelectedTaskId(res.id);
+              });
+            },
+            onCancel: function () { setShowGlobalCreate(false); },
+          }),
+        ) : null,
        selectedIds.size > 0 ? h(BulkActionBar, {
          count: selectedIds.size,
          assignees: (boardData && boardData.assignees) || [],
@@ -1158,6 +1204,8 @@
           allTasks: boardData.columns.reduce(function (acc, c) { return acc.concat(c.tasks); }, []),
           assignees: (boardData && boardData.assignees) || [],
           eventTick: taskEventTick[selectedTaskId] || 0,
+          onOpenTask: setSelectedTaskId,
+          onDeleteTask: deleteTask,
         }) : null,
       ),
     );
@@ -2090,17 +2138,28 @@
       return h("div", { className: "hermes-kanban-routine-group" },
         h("div", { className: "hermes-kanban-routine-group-title" }, label),
         items.map(function (r) {
+          const ps = props.promoteState && props.promoteState.id === r.id ? props.promoteState : null;
           return h("div", { key: r.id, className: "hermes-kanban-routine-item" + (r.checked_today ? " hermes-kanban-routine-item--done" : "") },
-            h("label", { className: "hermes-kanban-routine-check" },
-              h("input", {
-                type: "checkbox",
-                checked: !!r.checked_today,
-                onChange: function (e) { props.onToggle(r, e.target.checked); },
-              }),
-              h("span", { className: "hermes-kanban-routine-title", title: r.body || r.title }, r.title),
+            h("div", { className: "hermes-kanban-routine-main" },
+              h("label", { className: "hermes-kanban-routine-check" },
+                h("input", {
+                  type: "checkbox",
+                  checked: !!r.checked_today,
+                  onChange: function (e) { props.onToggle(r, e.target.checked); },
+                }),
+                h("span", { className: "hermes-kanban-routine-title", title: r.body || r.title }, r.title),
+              ),
+              ps ? h("div", {
+                className: "hermes-kanban-routine-feedback hermes-kanban-routine-feedback--" + ps.status,
+              }, ps.text) : null,
             ),
             h("div", { className: "hermes-kanban-routine-actions" },
-              h("button", { type: "button", title: "Promote to triage task", onClick: function () { props.onPromote(r); } }, "↗"),
+              h("button", {
+                type: "button",
+                title: "Promote to triage task",
+                disabled: ps && ps.status === "busy",
+                onClick: function () { props.onPromote(r); },
+              }, ps && ps.status === "busy" ? "…" : "↗"),
               h("button", { type: "button", title: "Hide routine", onClick: function () { props.onArchive(r); } }, "×"),
             ),
           );
@@ -2221,10 +2280,15 @@
       ),
       h("div", { className: "flex-1" }),
       h(Button, {
+        onClick: props.onNewTaskClick,
+        size: "sm",
+        title: "Add a rough task to Triage. Leave priority blank to let Hermes auto-rank it; run Ask AI to refine spec afterward.",
+      }, props.showGlobalCreate ? "Close add task" : "+ Add task / AI triage"),
+      h(Button, {
         onClick: props.onNudgeDispatch,
         size: "sm",
-        title: "Wake the dispatcher to claim ready tasks now instead of waiting for the next tick. Use this after adding tasks if you want them picked up immediately.",
-      }, tx(t, "nudgeDispatcher", "Nudge dispatcher")),
+        title: "Tell the dispatcher to immediately scan Ready tasks and start available workers instead of waiting for the next automatic tick. It does not create or edit tasks.",
+      }, "▶ Start ready tasks now"),
       h(Button, {
         onClick: props.onRefresh,
         size: "sm",
@@ -2324,7 +2388,7 @@
                  title: "Reassign selected tasks to a different Hermes profile. Pick a profile (or unassign) and click Apply." },
         h(Select, Object.assign({
           value: assignee,
-          className: "h-7 text-xs",
+          className: "h-7 text-xs hermes-kanban-bulk-reassign-select",
         }, selectChangeHandler(setAssignee)),
           h(SelectOption, { value: "" }, "— reassign —"),
           h(SelectOption, { value: "__none__" }, "(unassign)"),
@@ -3412,6 +3476,15 @@
             }, fullscreen ? "↘ Exit" : "⛶ Full"),
             h("button", {
               type: "button",
+              onClick: function () {
+                if (!props.onDeleteTask) return;
+                Promise.resolve(props.onDeleteTask(props.taskId)).then(function () { props.onClose(); });
+              },
+              className: "hermes-kanban-drawer-nav hermes-kanban-drawer-nav--danger",
+              title: "Permanently delete this task",
+            }, "Delete"),
+            h("button", {
+              type: "button",
               onClick: props.onClose,
               className: "hermes-kanban-drawer-close",
               title: tx(t, "close", "Close (Esc)"),
@@ -3439,6 +3512,7 @@
           onRemoveParent: removeLink,
           onAddChild: addChild,
           onRemoveChild: removeChild,
+          onOpenTask: props.onOpenTask,
           homeChannels: homeChannels,
           homeBusy: homeBusy,
           onToggleHomeSub: toggleHomeSubscription,
@@ -3789,6 +3863,7 @@
       h(DependencyEditor, {
         task: t,
         links, allTasks: props.allTasks,
+        onOpenTask: props.onOpenTask,
         onAddParent: props.onAddParent,
         onRemoveParent: props.onRemoveParent,
         onAddChild: props.onAddChild,
@@ -4164,7 +4239,12 @@
             ? h("span", { className: "hermes-kanban-deps-empty" }, tx(t, "none", "none"))
             : (links.parents || []).map(function (id) {
                 return h("span", { key: id, className: "hermes-kanban-dep-chip" },
-                  id,
+                  h("button", {
+                    type: "button",
+                    className: "hermes-kanban-dep-chip-open",
+                    onClick: function () { if (props.onOpenTask) props.onOpenTask(id); },
+                    title: "Open linked task " + id,
+                  }, id),
                   h("button", {
                     type: "button",
                     className: "hermes-kanban-dep-chip-x",
@@ -4202,7 +4282,12 @@
             ? h("span", { className: "hermes-kanban-deps-empty" }, tx(t, "none", "none"))
             : (links.children || []).map(function (id) {
                 return h("span", { key: id, className: "hermes-kanban-dep-chip" },
-                  id,
+                  h("button", {
+                    type: "button",
+                    className: "hermes-kanban-dep-chip-open",
+                    onClick: function () { if (props.onOpenTask) props.onOpenTask(id); },
+                    title: "Open linked task " + id,
+                  }, id),
                   h("button", {
                     type: "button",
                     className: "hermes-kanban-dep-chip-x",
