@@ -9,6 +9,19 @@
   width: 100%;
 }
 
+/* The dashboard's default action-button treatment uses bold monospace with
+ * very wide tracking.  It looks distinctive, but Kanban is task-management UI:
+ * labels such as "Start ready tasks now" and bulk actions need to scan quickly.
+ * Scope this readability override to Kanban buttons that opt into the global
+ * mono/tracked style; keep select triggers, code, IDs, and metadata untouched.
+ */
+.hermes-kanban button[class*="font-mono"][class*="tracking-"] {
+  font-family: ui-rounded, "SF Pro Rounded", "Pretendard Variable", Pretendard, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+  font-weight: 650 !important;
+  letter-spacing: 0.025em !important;
+  line-height: 1.15 !important;
+}
+
 /* ---- Code/pre reset (theme-immune default) --------------------------- *
  *
  * Themes (shipped AND user-installable) routinely paint every <code> and
