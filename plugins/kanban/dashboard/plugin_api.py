@@ -492,14 +492,10 @@ def get_board(
                 "SELECT DISTINCT tenant FROM tasks WHERE tenant IS NOT NULL ORDER BY tenant"
             )
         ]
-        # List of distinct assignees for the lane-by-profile sub-grouping.
-        assignees = [
-            r["assignee"]
-            for r in conn.execute(
-                "SELECT DISTINCT assignee FROM tasks WHERE assignee IS NOT NULL "
-                "AND status != 'archived' ORDER BY assignee"
-            )
-        ]
+        # List known assignees for filters/reassign controls.  Include profiles
+        # discovered on disk so a newly-created profile appears before it has
+        # been assigned its first task.
+        assignees = [entry["name"] for entry in kanban_db.known_assignees(conn)]
 
         routines = [_routine_dict(r) for r in kanban_db.list_routines(conn)]
 
