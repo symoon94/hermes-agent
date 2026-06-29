@@ -75,11 +75,40 @@
 
 /* ---- Columns layout -------------------------------------------------- */
 
+.hermes-kanban-column-groups {
+  display: flex;
+  gap: 1rem;
+  align-items: stretch;
+  overflow-x: auto;
+  padding-bottom: 0.5rem;
+}
+
+.hermes-kanban-column-group {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-width: max-content;
+  padding: 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--color-border) 75%, transparent);
+  border-radius: calc(var(--radius) + 4px);
+  background: color-mix(in srgb, var(--color-card) 45%, transparent);
+}
+
+.hermes-kanban-column-group-title {
+  padding: 0 0.25rem;
+  color: var(--color-muted-foreground);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
 .hermes-kanban-columns {
   display: flex;
   gap: 0.75rem;
   align-items: start;
-  overflow-x: auto;
 }
 
 .hermes-kanban-column {
@@ -666,6 +695,28 @@
   font-family: var(--font-mono, ui-monospace, monospace);
 }
 
+.hermes-kanban-drawer-head-id {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.hermes-kanban-drawer-head-copy {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0.12rem 0.2rem;
+}
+.hermes-kanban-drawer-head-copy:hover,
+.hermes-kanban-drawer-head-copy:focus-visible {
+  color: var(--color-foreground);
+  outline: none;
+}
+
 /* On mobile the dashboard shell renders a fixed top bar (min-h-14, hidden at
    the lg breakpoint). The drawer is a body-level z-60 overlay starting at the
    viewport top, so its header would sit behind that bar. Push the header down
@@ -778,6 +829,22 @@
   gap: 0.5rem;
   font-size: 1rem;
   font-weight: 600;
+}
+
+.hermes-kanban-task-id-pill {
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--color-ring, #f59e0b) 45%, var(--color-border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-ring, #f59e0b) 10%, var(--color-card));
+  color: var(--color-foreground);
+  cursor: default;
+  flex: 0 0 auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0.3rem 0.55rem;
+  white-space: nowrap;
 }
 
 .hermes-kanban-drawer-meta {
@@ -923,13 +990,40 @@
 
 .hermes-kanban-drawer-comment-row {
   display: flex;
+  align-items: flex-end;
   gap: 0.4rem;
   padding: 0.55rem 0.75rem;
-  /* Keep the comment input clear of the mobile browser nav bar / home
-     indicator by extending the bottom padding with the safe-area inset. */
-  padding-bottom: max(0.55rem, calc(0.55rem + env(safe-area-inset-bottom)));
   border-top: 1px solid var(--color-border);
   background: color-mix(in srgb, var(--color-card) 90%, transparent);
+}
+
+.hermes-kanban-comment-input {
+  flex: 1;
+  min-height: 3.25rem;
+  max-height: 9rem;
+  resize: vertical;
+  border: 1px solid var(--color-input, var(--color-border));
+  border-radius: var(--radius-sm, 0.25rem);
+  background: transparent;
+  color: var(--color-foreground);
+  font: inherit;
+  font-size: 0.875rem;
+  line-height: 1.35;
+  padding: 0.45rem 0.55rem;
+}
+.hermes-kanban-comment-input:focus {
+  outline: none;
+  border-color: var(--color-ring);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-ring) 30%, transparent);
+}
+
+.hermes-kanban-drawer-action-footer {
+  padding: 0.55rem 0.75rem;
+  /* Footer is now the bottom-most drawer element; keep it clear of the
+     mobile browser nav bar / home indicator. */
+  padding-bottom: max(0.55rem, calc(0.55rem + env(safe-area-inset-bottom)));
+  border-top: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-card) 92%, transparent);
 }
 
 .hermes-kanban-count {

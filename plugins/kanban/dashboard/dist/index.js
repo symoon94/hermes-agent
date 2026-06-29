@@ -88,6 +88,23 @@
 
   // Order matches BOARD_COLUMNS in plugin_api.py.
   const COLUMN_ORDER = ["triage", "todo", "scheduled", "ready", "running", "blocked", "review", "done"];
+  const STATUS_GROUPS = [
+    {
+      key: "intake",
+      label: "Intake",
+      statuses: ["triage", "todo", "scheduled"],
+    },
+    {
+      key: "execution",
+      label: "Execution",
+      statuses: ["ready", "running", "blocked"],
+    },
+    {
+      key: "closure",
+      label: "Review / Done",
+      statuses: ["review", "done"],
+    },
+  ];
   // English fallback dictionaries — used when the i18n catalog is missing
   // a key, and as defaults for the get*() helpers below so callers running
   // outside any React component (where there's no `t`) still get sane text.
@@ -177,6 +194,33 @@
     return p.phantom_cards || p.phantom_refs || [];
   }
 
+  function copyTextToClipboard(text) {
+    const value = String(text || "");
+    if (!value) return Promise.resolve(false);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(value).then(function () { return true; }).catch(function () {
+        return fallbackCopyText(value);
+      });
+    }
+    return Promise.resolve(fallbackCopyText(value));
+  }
+
+  function fallbackCopyText(text) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    ta.style.top = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); }
+    catch (_e) { ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+  }
+
   // Takes an optional `t` so the prompt/alert text is localised. Callers
   // outside React components can pass null and fall through to English.
   function withCompletionSummary(patch, count, t) {
@@ -190,11 +234,7 @@
     );
     if (value === null) return null;
     const summary = value.trim();
-    if (!summary) {
-      window.alert(tx(t, "completionSummaryRequired",
-        "Completion summary is required before marking a task done."));
-      return null;
-    }
+    if (!summary) return patch;
     return Object.assign({}, patch, { result: summary, summary });
   }
 
@@ -2621,25 +2661,53 @@
     const handleDragEnd = useCallback(function () {
       if (props.onDragEnd) props.onDragEnd();
     }, [props.onDragEnd]);
-    return h("div", { className: "hermes-kanban-columns", onDragStart: handleDragStart, onDragEnd: handleDragEnd },
-      props.board.columns.map(function (col) {
-        return h(Column, {
-          key: col.name,
-          column: col,
-          laneByProfile: props.laneByProfile,
-          selectedIds: props.selectedIds,
-          failedIds: props.failedIds,
-          draggingTaskId: props.draggingTaskId,
-          toggleSelected: props.toggleSelected,
-          toggleRange: props.toggleRange,
-          selectAllInColumn: props.selectAllInColumn,
-          onMove: props.onMove,
-          onMoveSelected: props.onMoveSelected,
-          onOpen: props.onOpen,
-          onCreate: props.onCreate,
-          allTasks: props.allTasks,
-        });
+    const columnsByName = {};
+    (props.board.columns || []).forEach(function (col) {
+      columnsByName[col.name] = col;
+    });
+    const groupedColumns = STATUS_GROUPS.map(function (group) {
+      return Object.assign({}, group, {
+        columns: group.statuses.map(function (name) { return columnsByName[name]; }).filter(Boolean),
+      });
+    }).filter(function (group) { return group.columns.length > 0; });
+    const groupedNames = new Set();
+    groupedColumns.forEach(function (group) {
+      group.columns.forEach(function (col) { groupedNames.add(col.name); });
+    });
+    const ungroupedColumns = (props.board.columns || []).filter(function (col) {
+      return !groupedNames.has(col.name);
+    });
+    const renderColumn = function (col) {
+      return h(Column, {
+        key: col.name,
+        column: col,
+        laneByProfile: props.laneByProfile,
+        selectedIds: props.selectedIds,
+        failedIds: props.failedIds,
+        draggingTaskId: props.draggingTaskId,
+        toggleSelected: props.toggleSelected,
+        toggleRange: props.toggleRange,
+        selectAllInColumn: props.selectAllInColumn,
+        onMove: props.onMove,
+        onMoveSelected: props.onMoveSelected,
+        onOpen: props.onOpen,
+        onCreate: props.onCreate,
+        allTasks: props.allTasks,
+      });
+    };
+    return h("div", { className: "hermes-kanban-column-groups", onDragStart: handleDragStart, onDragEnd: handleDragEnd },
+      groupedColumns.map(function (group) {
+        return h("section", { key: group.key, className: "hermes-kanban-column-group" },
+          h("div", { className: "hermes-kanban-column-group-title" }, group.label),
+          h("div", { className: "hermes-kanban-columns" },
+            group.columns.map(renderColumn),
+          ),
+        );
       }),
+      ungroupedColumns.length > 0 ? h("section", { key: "other", className: "hermes-kanban-column-group" },
+        h("div", { className: "hermes-kanban-column-group-title" }, "Other"),
+        h("div", { className: "hermes-kanban-columns" }, ungroupedColumns.map(renderColumn)),
+      ) : null,
       h(TrashDropZone, {
         draggingTaskId: props.draggingTaskId,
         selectedIds: props.selectedIds,
@@ -3194,6 +3262,7 @@
     const [uploadErr, setUploadErr] = useState(null);
     const [editing, setEditing] = useState(false);
     const [fullscreen, setFullscreen] = useState(false);
+    const [headIdCopied, setHeadIdCopied] = useState(false);
     const bodyRef = useRef(null);
     // Home-channel notification toggles. homeChannels is the list of platforms
     // the user has a /sethome on; each entry has a `subscribed` bool telling
@@ -3293,13 +3362,42 @@
       }
       const finalPatch = withCompletionSummary(patch, 1);
       if (!finalPatch) return Promise.resolve();
+      const completing = finalPatch.status === "done";
+      const jiraKeys = completing ? collectJiraKeys(data) : [];
+      const updateJira = completing && jiraKeys.length > 0 && window.confirm(
+        `Linked Jira ticket(s) detected: ${jiraKeys.join(", ")}. Also transition them to Done after Hermes completes this task?`,
+      );
+      const offerWorkWrap = completing && isUpstageLikeTask(data);
       setPatchErr(null);
       return SDK.fetchJSON(withBoard(`${API}/tasks/${encodeURIComponent(props.taskId)}`, boardSlug), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(finalPatch),
-      }).then(function () { load(); props.onRefresh(); })
-        .catch(function (e) { setPatchErr(parseApiErrorMessage(e)); });
+      }).then(function () {
+        load();
+        props.onRefresh();
+        if (updateJira) {
+          SDK.fetchJSON(withBoard(`${API}/integrations/jira/complete`, boardSlug), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ issues: jiraKeys }),
+          }).then(function (res) {
+            const failed = (res.results || []).filter(function (r) { return !r.ok; });
+            if (failed.length > 0) {
+              window.alert("Hermes task completed, but Jira update failed: " + failed.map(function (r) {
+                return `${r.issue}: ${r.error || "unknown error"}`;
+              }).join("; "));
+            }
+          }).catch(function (e) {
+            window.alert("Hermes task completed, but Jira update failed: " + parseApiErrorMessage(e));
+          });
+        }
+        if (offerWorkWrap && window.confirm("If this was handled with my-agent-template /work, copy '/work wrap' now?")) {
+          copyTextToClipboard("/work wrap").then(function () {
+            window.alert("Copied '/work wrap'. Run it yourself when you want to wrap the Upstage /work task.");
+          });
+        }
+      }).catch(function (e) { setPatchErr(parseApiErrorMessage(e)); });
     };
 
     // Triage specifier — calls the auxiliary LLM to flesh out a rough
@@ -3423,10 +3521,9 @@
       if (!el) return;
       const top = target === "bottom" ? el.scrollHeight : 0;
       try {
-        el.scrollTo({ top: top, behavior: "smooth" });
-      } catch (_e) {
-        el.scrollTop = top;
-      }
+        el.scrollTo({ top: top, behavior: "auto" });
+      } catch (_e) {}
+      el.scrollTop = top;
     };
 
     const toggleHomeSubscription = function (platform, currentlySubscribed) {
@@ -3466,13 +3563,31 @@
         });
     };
 
+    const copyHeaderTaskId = function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      copyTextToClipboard(props.taskId).then(function () {
+        setHeadIdCopied(true);
+        window.setTimeout(function () { setHeadIdCopied(false); }, 1400);
+      });
+    };
+
     return h("div", { className: "hermes-kanban-drawer-shade", onClick: props.onClose },
       h("div", {
         className: cn("hermes-kanban-drawer", fullscreen ? "hermes-kanban-drawer--fullscreen" : ""),
         onClick: function (e) { e.stopPropagation(); },
       },
         h("div", { className: "hermes-kanban-drawer-head" },
-          h("span", { className: "text-xs text-muted-foreground" }, props.taskId),
+          h("div", { className: "hermes-kanban-drawer-head-id" },
+            h("span", { className: "text-xs text-muted-foreground" }, props.taskId),
+            h("button", {
+              type: "button",
+              onClick: copyHeaderTaskId,
+              className: "hermes-kanban-drawer-head-copy",
+              title: headIdCopied ? `Copied ${props.taskId}` : `Copy task id ${props.taskId}`,
+              "aria-label": `Copy task id ${props.taskId}`,
+            }, headIdCopied ? "✓" : "📋"),
+          ),
           h("div", { className: "hermes-kanban-drawer-head-actions" },
             h("button", {
               type: "button",
@@ -3541,7 +3656,7 @@
           uploadErr: uploadErr,
         }) : null,
         data ? h("div", { className: "hermes-kanban-drawer-comment-row" },
-          h(Input, {
+          h("textarea", {
             value: newComment,
             onChange: function (e) { setNewComment(e.target.value); },
             onKeyDown: function (e) {
@@ -3549,13 +3664,23 @@
                 e.preventDefault(); handleComment();
               }
             },
-            placeholder: tx(t, "addComment", "Add a comment… (Enter to submit)"),
-            className: "h-8 text-sm flex-1",
+            placeholder: tx(t, "addComment", "Add a comment… (Enter to submit, Shift+Enter for newline)"),
+            className: "hermes-kanban-comment-input",
+            rows: 2,
           }),
           h(Button, {
             onClick: handleComment,
             size: "sm",
           }, tx(t, "comment", "Comment")),
+        ) : null,
+        data ? h("div", { className: "hermes-kanban-drawer-action-footer" },
+          h(StatusActions, {
+            task: data.task,
+            onPatch: doPatch,
+            onSpecify: doSpecify,
+            onDecompose: doDecompose,
+            onAssembleTeam: doAssembleTeam,
+          }),
         ) : null,
       ),
     );
@@ -3624,6 +3749,32 @@
     if (typeof value === "object") {
       Object.keys(value).forEach(function (k) { collectTextFragments(value[k], out, depth + 1); });
     }
+  }
+
+  function collectJiraKeys(data) {
+    const links = collectRelatedLinks(data);
+    const keys = [];
+    const seen = new Set();
+    links.forEach(function (link) {
+      if (!link || link.kind !== "Jira") return;
+      const m = /\b(AIPACKV?|SBOX)-\d+\b/i.exec((link.label || "") + " " + (link.url || ""));
+      if (!m) return;
+      const key = m[0].toUpperCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      keys.push(key);
+    });
+    return keys;
+  }
+
+  function isUpstageLikeTask(data) {
+    if (!data || !data.task) return false;
+    const texts = [];
+    collectTextFragments(data.task.title, texts, 0);
+    collectTextFragments(data.task.body, texts, 0);
+    collectTextFragments(data.task.tenant, texts, 0);
+    const joined = texts.join("\n").toLowerCase();
+    return /upstage|enterprise-portal|aipack|ai pack|solarbox|solar box|jira|atlassian|\/work/.test(joined);
   }
 
   function collectRelatedLinks(data) {
@@ -3810,6 +3961,7 @@
     return h("div", { className: "hermes-kanban-drawer-body", ref: props.bodyRef },
       h("div", { className: "hermes-kanban-drawer-title" },
         h("span", { className: cn("hermes-kanban-dot", COLUMN_DOT[t.status]) }),
+        h("span", { className: "hermes-kanban-task-id-pill" }, t.id),
         props.editing
           ? h(TitleEditor, {
               initial: t.title || "",
@@ -3845,13 +3997,6 @@
         }) : null,
         t.created_by ? h(MetaRow, { label: tx(i18n, "createdBy", "Created by"), value: t.created_by }) : null,
       ),
-      h(StatusActions, {
-        task: t,
-        onPatch: props.onPatch,
-        onSpecify: props.onSpecify,
-        onDecompose: props.onDecompose,
-        onAssembleTeam: props.onAssembleTeam,
-      }),
       h(RelatedLinksSection, { data: props.data }),
       h(TeamAssemblyPanel, { task: t, comments }),
       h(ClarifyPanel, {
