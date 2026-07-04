@@ -36,10 +36,15 @@ the port.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
+import os
 import sqlite3
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Optional
@@ -174,6 +179,10 @@ def _task_dict(
     d["latest_summary"] = latest_summary
     # Keep body short on list endpoints; full body comes from /tasks/:id.
     return d
+
+
+def _routine_dict(item: kanban_db.RoutineItem) -> dict[str, Any]:
+    return asdict(item)
 
 
 def _event_dict(event: kanban_db.Event) -> dict[str, Any]:
@@ -488,16 +497,15 @@ def get_board(
                 "SELECT DISTINCT tenant FROM tasks WHERE tenant IS NOT NULL ORDER BY tenant"
             )
         ]
-        # List of distinct assignees for the lane-by-profile sub-grouping.
-        assignees = [
-            r["assignee"]
-            for r in conn.execute(
-                "SELECT DISTINCT assignee FROM tasks WHERE assignee IS NOT NULL "
-                "AND status != 'archived' ORDER BY assignee"
-            )
-        ]
+        # List known assignees for filters/reassign controls.  Include profiles
+        # discovered on disk so a newly-created profile appears before it has
+        # been assigned its first task.
+        assignees = [entry["name"] for entry in kanban_db.known_assignees(conn)]
+
+        routines = [_routine_dict(r) for r in kanban_db.list_routines(conn)]
 
         return {
+            "routines": routines,
             "columns": [
                 {"name": name, "tasks": columns[name]} for name in columns.keys()
             ],
@@ -576,6 +584,80 @@ def get_task(
 # ---------------------------------------------------------------------------
 # POST /tasks
 # ---------------------------------------------------------------------------
+
+class RoutineCreateBody(BaseModel):
+    title: str
+    body: Optional[str] = None
+    frequency: str = "daily"
+    sort_order: Optional[int] = None
+    source_task_id: Optional[str] = None
+
+
+class RoutineCheckBody(BaseModel):
+    checked: bool = True
+    check_date: Optional[str] = None
+
+
+@router.get("/routines")
+def list_routines(board: Optional[str] = Query(None)):
+    board = _resolve_board(board)
+    conn = _conn(board=board)
+    try:
+        return {"routines": [_routine_dict(r) for r in kanban_db.list_routines(conn)]}
+    finally:
+        conn.close()
+
+
+@router.post("/routines")
+def create_routine(payload: RoutineCreateBody, board: Optional[str] = Query(None)):
+    board = _resolve_board(board)
+    conn = _conn(board=board)
+    try:
+        rid = kanban_db.create_routine_item(
+            conn,
+            title=payload.title,
+            body=payload.body,
+            frequency=payload.frequency,
+            sort_order=payload.sort_order,
+            source_task_id=payload.source_task_id,
+        )
+        item = next((r for r in kanban_db.list_routines(conn, include_inactive=True) if r.id == rid), None)
+        return {"routine": _routine_dict(item) if item else {"id": rid}}
+    finally:
+        conn.close()
+
+
+@router.post("/routines/{routine_id}/check")
+def set_routine_check(routine_id: str, payload: RoutineCheckBody, board: Optional[str] = Query(None)):
+    board = _resolve_board(board)
+    conn = _conn(board=board)
+    try:
+        ok = kanban_db.set_routine_checked(
+            conn,
+            routine_id,
+            payload.checked,
+            check_date=payload.check_date,
+            checked_by="dashboard",
+        )
+        if not ok:
+            raise HTTPException(status_code=404, detail="Routine not found")
+        item = next((r for r in kanban_db.list_routines(conn, include_inactive=True, check_date=payload.check_date) if r.id == routine_id), None)
+        return {"routine": _routine_dict(item) if item else None}
+    finally:
+        conn.close()
+
+
+@router.delete("/routines/{routine_id}")
+def archive_routine(routine_id: str, board: Optional[str] = Query(None)):
+    board = _resolve_board(board)
+    conn = _conn(board=board)
+    try:
+        if not kanban_db.archive_routine_item(conn, routine_id):
+            raise HTTPException(status_code=404, detail="Routine not found")
+        return {"ok": True}
+    finally:
+        conn.close()
+
 
 class CreateTaskBody(BaseModel):
     title: str
@@ -2374,6 +2456,104 @@ def set_orchestration_settings(payload: OrchestrationSettingsBody):
 
     # Echo back the resolved state (callers usually re-render from it).
     return get_orchestration_settings()
+
+
+# ---------------------------------------------------------------------------
+# Integrations: Jira transition helper used by the dashboard Complete flow.
+# ---------------------------------------------------------------------------
+
+class JiraCompleteBody(BaseModel):
+    issues: list[str] = Field(default_factory=list)
+
+
+def _read_env_file(path: Path) -> dict[str, str]:
+    out: dict[str, str] = {}
+    if not path.exists():
+        return out
+    for raw in path.read_text(errors="ignore").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, val = line.split("=", 1)
+        out[key.strip()] = val.strip().strip('"').strip("'")
+    return out
+
+
+def _jira_config() -> dict[str, str]:
+    env: dict[str, str] = {}
+    env.update(_read_env_file(Path.home() / ".hermes" / ".env"))
+    # Compatibility bridge: the user's Luna setup already carries Jira auth.
+    # This keeps Hermes Kanban useful without silently requiring a separate MCP.
+    env.update(_read_env_file(Path.home() / "git" / "luna" / "daemon" / ".env"))
+    env.update({k: v for k, v in os.environ.items() if k.startswith(("JIRA_", "HERMES_JIRA_"))})
+    return {
+        "base_url": env.get("HERMES_JIRA_BASE_URL") or env.get("JIRA_BASE_URL") or "https://agi4work.atlassian.net",
+        "email": env.get("HERMES_JIRA_EMAIL") or env.get("JIRA_EMAIL") or "luna@upstage.ai",
+        "token": env.get("HERMES_JIRA_API_TOKEN") or env.get("JIRA_API_TOKEN") or "",
+    }
+
+
+def _jira_request(method: str, path: str, *, body: Optional[dict] = None) -> Any:
+    cfg = _jira_config()
+    if not cfg["token"]:
+        raise RuntimeError("JIRA_API_TOKEN is not configured")
+    base = cfg["base_url"].rstrip("/")
+    url = base + path
+    data = None if body is None else json.dumps(body).encode("utf-8")
+    auth = base64.b64encode(f"{cfg['email']}:{cfg['token']}".encode("utf-8")).decode("ascii")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method=method,
+        headers={
+            "Authorization": f"Basic {auth}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            raw = resp.read().decode("utf-8")
+            return json.loads(raw) if raw.strip() else {}
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Jira HTTP {exc.code}: {detail[:500]}") from exc
+
+
+def _pick_jira_done_transition(transitions: list[dict]) -> Optional[str]:
+    # Prefer concrete target/name Done/완료. Do not blindly choose the first
+    # statusCategory=done transition because Jira terminal states like Canceled
+    # can share that category.
+    preferred = {"done", "완료", "complete", "completed"}
+    for tr in transitions:
+        name = str(tr.get("name") or "").strip().lower()
+        to_name = str(((tr.get("to") or {}).get("name")) or "").strip().lower()
+        if name in preferred or to_name in preferred:
+            return str(tr.get("id"))
+    return None
+
+
+@router.post("/integrations/jira/complete")
+def complete_jira_issues(payload: JiraCompleteBody):
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw_issue in payload.issues or []:
+        issue = str(raw_issue or "").strip().upper()
+        if not issue or issue in seen:
+            continue
+        seen.add(issue)
+        try:
+            transitions = _jira_request("GET", f"/rest/api/3/issue/{urllib.parse.quote(issue)}/transitions")
+            transition_id = _pick_jira_done_transition(transitions.get("transitions") or [])
+            if not transition_id:
+                raise RuntimeError("no concrete Done/완료 transition available")
+            _jira_request("POST", f"/rest/api/3/issue/{urllib.parse.quote(issue)}/transitions", body={
+                "transition": {"id": transition_id},
+            })
+            results.append({"issue": issue, "ok": True, "transition_id": transition_id})
+        except Exception as exc:
+            results.append({"issue": issue, "ok": False, "error": str(exc)})
+    return {"ok": all(r.get("ok") for r in results), "results": results}
 
 
 @router.websocket("/events")

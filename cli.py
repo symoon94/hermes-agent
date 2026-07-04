@@ -4796,7 +4796,10 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
             display = cfg.get("display", {}) if isinstance(cfg.get("display"), dict) else {}
             pet_cfg = display.get("pet", {}) if isinstance(display.get("pet"), dict) else {}
 
-            enabled = bool(pet_cfg.get("enabled"))
+            render_raw = pet_cfg.get("render_mode", "auto")
+            render_mode = str(render_raw if render_raw is not None else "auto").strip('"\'').lower()
+            terminal_pet_off = render_raw is False or render_mode in {"off", "false"}
+            enabled = bool(pet_cfg.get("enabled")) and not terminal_pet_off
             slug = str(pet_cfg.get("slug", "") or "")
             scale = float(pet_cfg.get("scale", constants.DEFAULT_SCALE) or constants.DEFAULT_SCALE)
             cols = constants.resolve_cols(scale, pet_cfg.get("unicode_cols", 0))
