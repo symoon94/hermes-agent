@@ -2437,7 +2437,7 @@
         title: "Permanently delete selected tasks. This cannot be undone.",
       }, tx(t, "delete", "Delete")),
       h("div", { className: "hermes-kanban-bulk-priority",
-                 title: "Set priority on selected tasks. Lower numbers are higher priority; 1 = top, 0 = unranked/last." },
+                 title: "Set priority on selected tasks. Higher numbers are higher priority; 0 = unranked/last." },
         h(Input, {
           type: "number",
           value: priority,
@@ -2572,15 +2572,15 @@
   }
 
   function prioritySort(a, b) {
-    // Luna-style operator priority: lower numbers are more important
-    // (1 = top). 0/blank is unranked and stays last, then creation time/id
-    // keep the list stable as a master queue.
+    // Match the dispatcher/API ordering: larger priority numbers are more
+    // important. 0/blank is unranked and stays last, then creation time/id keep
+    // the list stable.
     const ap = Number(a.priority || 0);
     const bp = Number(b.priority || 0);
     const au = ap <= 0 ? 1 : 0;
     const bu = bp <= 0 ? 1 : 0;
     if (au !== bu) return au - bu;
-    if (ap !== bp) return ap - bp;
+    if (ap !== bp) return bp - ap;
     const ac = Number(a.created_at || 0);
     const bc = Number(b.created_at || 0);
     if (ac !== bc) return ac - bc;
@@ -2789,17 +2789,21 @@
       }
     };
 
+    const sortedTasks = useMemo(function () {
+      return (props.column.tasks || []).slice().sort(prioritySort);
+    }, [props.column.tasks]);
+
     const lanes = useMemo(function () {
       if (!props.laneByProfile || props.column.name !== "running") return null;
       const byProfile = {};
-      for (const tk of props.column.tasks) {
+      for (const tk of sortedTasks) {
         const key = tk.assignee || "(unassigned)";
         (byProfile[key] = byProfile[key] || []).push(tk);
       }
       return Object.keys(byProfile).sort().map(function (k) {
         return { assignee: k, tasks: byProfile[k] };
       });
-    }, [props.column, props.laneByProfile]);
+    }, [props.column.name, props.laneByProfile, sortedTasks]);
 
     const colHelp = getColumnHelp(t, props.column.name);
     const colLabel = getColumnLabel(t, props.column.name);
@@ -2874,7 +2878,7 @@
                   }),
                 );
               })
-            : props.column.tasks.map(function (tk) {
+            : sortedTasks.map(function (tk) {
                 return h(TaskCard, {
                   key: tk.id, task: tk,
                   selected: props.selectedIds.has(tk.id),
@@ -3198,7 +3202,7 @@
           onChange: function (e) { setPriority(e.target.value); },
           placeholder: "pri",
           className: "h-7 text-xs w-16",
-          title: "Priority. Lower numbers are higher priority; 1 = top, 0 = unranked/last. Leave blank to auto-rank from the task text.",
+          title: "Priority. Higher numbers are higher priority; 0 = unranked/last. Leave blank to auto-rank from the task text.",
         }),
         h(Input, {
           type: "date",
