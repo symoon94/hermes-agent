@@ -2881,8 +2881,14 @@ def get_task(conn: sqlite3.Connection, task_id: str) -> Optional[Task]:
 VALID_SORT_ORDERS: dict[str, str] = {
     "created": "created_at ASC, id ASC",
     "created-desc": "created_at DESC, id DESC",
-    "priority": "priority DESC, created_at ASC",
-    "priority-desc": "priority ASC, created_at ASC",
+    "priority": (
+        "CASE WHEN priority <= 0 THEN 1 ELSE 0 END ASC, "
+        "priority ASC, created_at ASC"
+    ),
+    "priority-desc": (
+        "CASE WHEN priority <= 0 THEN 1 ELSE 0 END ASC, "
+        "priority DESC, created_at ASC"
+    ),
     "status": "status ASC, created_at ASC",
     "assignee": "assignee ASC, created_at ASC",
     "title": "title ASC, id ASC",
@@ -2935,7 +2941,10 @@ def list_tasks(
             )
         query += f" ORDER BY {VALID_SORT_ORDERS[order_by]}"
     else:
-        query += " ORDER BY priority DESC, created_at ASC"
+        query += (
+            " ORDER BY CASE WHEN priority <= 0 THEN 1 ELSE 0 END ASC, "
+            "priority ASC, created_at ASC"
+        )
     if limit:
         query += f" LIMIT {int(limit)}"
     rows = conn.execute(query, params).fetchall()
@@ -7253,7 +7262,8 @@ def _dispatch_once_locked(
     ready_rows = conn.execute(
         "SELECT id, assignee FROM tasks "
         "WHERE status = 'ready' AND claim_lock IS NULL "
-        "ORDER BY priority DESC, created_at ASC"
+        "ORDER BY CASE WHEN priority <= 0 THEN 1 ELSE 0 END ASC, "
+        "priority ASC, created_at ASC"
     ).fetchall()
     # Honour kanban.max_in_progress: if the board already has enough running
     # tasks, skip spawning this tick so slow workers (local LLMs,
@@ -7495,7 +7505,8 @@ def _dispatch_once_locked(
     review_rows = conn.execute(
         "SELECT id, assignee FROM tasks "
         "WHERE status = 'review' AND claim_lock IS NULL "
-        "ORDER BY priority DESC, created_at ASC"
+        "ORDER BY CASE WHEN priority <= 0 THEN 1 ELSE 0 END ASC, "
+        "priority ASC, created_at ASC"
     ).fetchall()
     for row in review_rows:
         if max_spawn is not None and running_count + spawned >= max_spawn:

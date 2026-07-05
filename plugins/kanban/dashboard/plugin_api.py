@@ -488,7 +488,7 @@ def get_board(
             columns[col].append(d)
 
         # Stable per-column ordering already applied by list_tasks
-        # (priority DESC, created_at ASC), keep as-is.
+        # (lower non-zero priority first, then created_at ASC), keep as-is.
 
         # List of known tenants for the UI filter dropdown.
         tenants = [

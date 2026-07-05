@@ -2437,7 +2437,7 @@
         title: "Permanently delete selected tasks. This cannot be undone.",
       }, tx(t, "delete", "Delete")),
       h("div", { className: "hermes-kanban-bulk-priority",
-                 title: "Set priority on selected tasks. Higher numbers are higher priority; 0 = unranked/last." },
+                 title: "Set priority on selected tasks. Lower numbers are higher priority; 1 = top, 0 = unranked/last." },
         h(Input, {
           type: "number",
           value: priority,
@@ -2572,15 +2572,14 @@
   }
 
   function prioritySort(a, b) {
-    // Match the dispatcher/API ordering: larger priority numbers are more
-    // important. 0/blank is unranked and stays last, then creation time/id keep
-    // the list stable.
+    // Lower priority numbers are more important (P1 before P2). 0/blank is
+    // unranked and stays last, then creation time/id keep the list stable.
     const ap = Number(a.priority || 0);
     const bp = Number(b.priority || 0);
     const au = ap <= 0 ? 1 : 0;
     const bu = bp <= 0 ? 1 : 0;
     if (au !== bu) return au - bu;
-    if (ap !== bp) return bp - ap;
+    if (ap !== bp) return ap - bp;
     const ac = Number(a.created_at || 0);
     const bc = Number(b.created_at || 0);
     if (ac !== bc) return ac - bc;
@@ -3202,7 +3201,7 @@
           onChange: function (e) { setPriority(e.target.value); },
           placeholder: "pri",
           className: "h-7 text-xs w-16",
-          title: "Priority. Higher numbers are higher priority; 0 = unranked/last. Leave blank to auto-rank from the task text.",
+          title: "Priority. Lower numbers are higher priority; 1 = top, 0 = unranked/last. Leave blank to auto-rank from the task text.",
         }),
         h(Input, {
           type: "date",
