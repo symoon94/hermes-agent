@@ -48,6 +48,58 @@ logger = logging.getLogger(__name__)
 KANBAN_LIST_DEFAULT_LIMIT = 50
 KANBAN_LIST_MAX_LIMIT = 200
 
+_HUMAN_REVIEW_ARTIFACT_EXTENSIONS = {
+    ".md", ".markdown", ".txt", ".pdf", ".doc", ".docx", ".ppt",
+    ".pptx", ".xls", ".xlsx", ".csv", ".tsv", ".html", ".htm",
+}
+
+
+def _artifact_paths_from_metadata(metadata: Any) -> list[str]:
+    if not isinstance(metadata, dict):
+        return []
+    raw = metadata.get("artifacts")
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple)):
+        return []
+    return [str(p).strip() for p in raw if isinstance(p, str) and str(p).strip()]
+
+
+def _artifact_needs_human_review(path: str) -> bool:
+    _, ext = os.path.splitext(path.lower())
+    return ext in _HUMAN_REVIEW_ARTIFACT_EXTENSIONS
+
+
+def _artifact_is_inside_workspace(path: str, task: Any) -> bool:
+    workspace = getattr(task, "workspace_path", None) or os.environ.get("HERMES_KANBAN_WORKSPACE")
+    if not workspace:
+        return False
+    try:
+        artifact_abs = os.path.realpath(os.path.expanduser(path))
+        workspace_abs = os.path.realpath(os.path.expanduser(str(workspace)))
+        return os.path.commonpath([artifact_abs, workspace_abs]) == workspace_abs
+    except (OSError, ValueError):
+        return False
+
+
+def _should_review_gate_completion(task: Any, metadata: Any) -> bool:
+    """Return True when a worker completion should become a review block.
+
+    Scratch workspaces are ephemeral. For human-consumable document/research
+    deliverables, the worker should hand off for operator review instead of
+    moving the card straight to done. Humans/CLI callers still bypass this path.
+    """
+    if not os.environ.get("HERMES_KANBAN_TASK"):
+        return False
+    if getattr(task, "workspace_kind", None) != "scratch":
+        return False
+    if isinstance(metadata, dict) and metadata.get("requires_human_review") is True:
+        return True
+    return any(
+        _artifact_needs_human_review(path) and _artifact_is_inside_workspace(path, task)
+        for path in _artifact_paths_from_metadata(metadata)
+    )
+
 
 def _profile_has_kanban_toolset() -> bool:
     # Uses load_config() which has mtime-based caching, so this adds
@@ -598,6 +650,30 @@ def _handle_complete(args: dict, **kw) -> str:
             # Only enforce when a judge is actually reachable — see
             # _goal_judge_available for why an unavailable judge fails open.
             task = kb.get_task(conn, tid)
+            if task and _should_review_gate_completion(task, metadata):
+                artifacts_for_review = _artifact_paths_from_metadata(metadata)
+                artifact_line = (
+                    " Artifacts: " + ", ".join(artifacts_for_review[:5])
+                    if artifacts_for_review else ""
+                )
+                ok = kb.block_task(
+                    conn,
+                    tid,
+                    reason=(
+                        "review-required: deliverable artifact produced in a "
+                        "scratch workspace; human review/Done confirmation is "
+                        "required before cleanup."
+                        f"{artifact_line}"
+                    ),
+                    kind="needs_input",
+                    expected_run_id=_worker_run_id(tid),
+                )
+                if not ok:
+                    return tool_error(
+                        f"could not hand off {tid} for review (unknown id or stale run)"
+                    )
+                run = kb.latest_run(conn, tid)
+                return _ok(task_id=tid, run_id=run.id if run else None, status="blocked")
             if task and task.goal_mode and _goal_judge_available():
                 verdict = "done"
                 reason = ""
@@ -1211,7 +1287,12 @@ KANBAN_COMPLETE_SCHEMA = {
         "in ``artifacts`` — the gateway notifier will upload them as "
         "native attachments to the human who subscribed to the task, "
         "so the deliverable lands in their chat alongside the summary "
-        "instead of being a path they have to fetch by hand."
+        "instead of being a path they have to fetch by hand. For "
+        "human-consumable document/research deliverables in a scratch "
+        "workspace, do not call this as the final handoff unless the "
+        "human has already approved Done; call kanban_block with a "
+        "reason starting 'review-required:' so the operator can review "
+        "the artifact before scratch cleanup."
     ),
     "parameters": {
         "type": "object",

@@ -4135,6 +4135,125 @@ def _scan_prose_for_phantom_ids(
     return [m for m in unique if m not in existing]
 
 
+def _artifact_paths_from_metadata(metadata: Optional[dict]) -> list[str]:
+    """Return normalized artifact paths from run metadata."""
+    if not isinstance(metadata, dict):
+        return []
+    raw = metadata.get("artifacts")
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple)):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        s = item.strip()
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
+
+def _safe_artifact_filename(path: Path, index: int) -> str:
+    name = path.name.strip() or f"artifact-{index}"
+    name = re.sub(r"[^A-Za-z0-9._ -]+", "_", name).strip(" .")
+    return name or f"artifact-{index}"
+
+
+def _unique_child_path(directory: Path, filename: str) -> Path:
+    candidate = directory / filename
+    if not candidate.exists():
+        return candidate
+    stem = candidate.stem or "artifact"
+    suffix = candidate.suffix
+    for i in range(2, 10_000):
+        candidate = directory / f"{stem}-{i}{suffix}"
+        if not candidate.exists():
+            return candidate
+    return directory / f"{stem}-{int(time.time())}{suffix}"
+
+
+def _persist_completion_artifacts(
+    conn: sqlite3.Connection,
+    task_id: str,
+    metadata: Optional[dict],
+) -> tuple[Optional[dict], list[str]]:
+    """Copy completion artifacts into durable task attachments before cleanup.
+
+    Scratch workspaces are removed when a task reaches ``done``. Rewriting
+    ``metadata['artifacts']`` to copied attachment paths keeps completion
+    events and run metadata pointing at files that still exist after cleanup.
+    """
+    artifacts = _artifact_paths_from_metadata(metadata)
+    if not artifacts:
+        return metadata, []
+
+    metadata = dict(metadata) if isinstance(metadata, dict) else {}
+    dest_dir = task_attachments_dir(task_id)
+    persisted: list[str] = []
+    final_paths: list[str] = []
+    attachment_rows: list[tuple[str, str, int]] = []
+
+    for idx, raw in enumerate(artifacts, start=1):
+        src = Path(raw).expanduser()
+        try:
+            src_resolved = src.resolve(strict=True)
+        except OSError:
+            final_paths.append(raw)
+            continue
+        if not src_resolved.is_file():
+            final_paths.append(raw)
+            continue
+
+        try:
+            src_resolved.relative_to(dest_dir.resolve(strict=False))
+            stored = str(src_resolved)
+            final_paths.append(stored)
+            persisted.append(stored)
+            continue
+        except ValueError:
+            pass
+
+        try:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest = _unique_child_path(dest_dir, _safe_artifact_filename(src_resolved, idx))
+            shutil.copy2(src_resolved, dest)
+            size = dest.stat().st_size
+        except OSError:
+            final_paths.append(raw)
+            continue
+
+        stored = str(dest)
+        final_paths.append(stored)
+        persisted.append(stored)
+        attachment_rows.append((dest.name, stored, int(size)))
+
+    if persisted:
+        metadata["artifacts"] = final_paths
+        existing = metadata.get("persisted_artifacts")
+        persisted_meta = list(existing) if isinstance(existing, list) else []
+        seen = {str(p) for p in persisted_meta}
+        for path in persisted:
+            if path not in seen:
+                seen.add(path)
+                persisted_meta.append(path)
+        metadata["persisted_artifacts"] = persisted_meta
+
+        now = int(time.time())
+        for filename, stored_path, size in attachment_rows:
+            conn.execute(
+                "INSERT INTO task_attachments "
+                "(task_id, filename, stored_path, content_type, size, uploaded_by, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (task_id, filename, stored_path, None, size, "kanban_complete", now),
+            )
+        _append_event(conn, task_id, "artifacts_persisted", {"artifacts": persisted})
+
+    return metadata, persisted
+
+
 class HallucinatedCardsError(ValueError):
     """Raised by ``complete_task`` when ``created_cards`` contains ids
     that don't exist or weren't created by the completing worker.
@@ -4258,6 +4377,9 @@ def complete_task(
             )
         if cur.rowcount != 1:
             return False
+        metadata, persisted_artifacts = _persist_completion_artifacts(
+            conn, task_id, metadata,
+        )
         run_id = _end_run(
             conn, task_id,
             outcome="completed", status="done",
@@ -4287,6 +4409,8 @@ def complete_task(
         }
         if verified_cards:
             completed_payload["verified_cards"] = verified_cards
+        if persisted_artifacts:
+            completed_payload["persisted_artifacts"] = persisted_artifacts
         # Carry artifact paths in the event payload so the gateway
         # notifier can upload them as native attachments alongside the
         # completion message. Workers pass these via

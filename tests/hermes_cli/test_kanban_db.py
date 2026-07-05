@@ -2339,6 +2339,42 @@ def test_cleanup_workspace_removes_managed_scratch_dir(kanban_home):
     assert not ws.exists(), "Hermes-managed scratch dir should be cleaned up"
 
 
+def test_complete_persists_artifacts_before_scratch_cleanup(kanban_home):
+    """Artifact paths should survive scratch workspace deletion."""
+    with kb.connect() as conn:
+        t = kb.create_task(conn, title="document artifact")
+        task = kb.get_task(conn, t)
+        assert task is not None
+        ws = kb.resolve_workspace(task)
+        kb.set_workspace_path(conn, t, ws)
+        artifact = ws / "interview-guide.md"
+        artifact.write_text("# Interview guide\n", encoding="utf-8")
+
+        assert kb.complete_task(
+            conn,
+            t,
+            summary="wrote guide",
+            metadata={"artifacts": [str(artifact)]},
+        )
+        run = kb.latest_run(conn, t)
+        assert run is not None
+        assert run.metadata is not None
+        persisted = run.metadata["artifacts"][0]
+        attachments = kb.list_attachments(conn, t)
+        events = kb.list_events(conn, t)
+
+    assert not ws.exists(), "scratch workspace should still be cleaned up"
+    assert persisted != str(artifact)
+    assert persisted.startswith(str(kb.task_attachments_dir(t)))
+    assert Path(persisted).read_text(encoding="utf-8") == "# Interview guide\n"
+    assert len(attachments) == 1
+    assert attachments[0].stored_path == persisted
+    completed = [e for e in events if e.kind == "completed"][-1]
+    assert completed.payload is not None
+    assert completed.payload["artifacts"] == [persisted]
+    assert completed.payload["persisted_artifacts"] == [persisted]
+
+
 def test_cleanup_workspace_refuses_path_outside_scratch_root(kanban_home, tmp_path):
     """A scratch task with a user path outside the workspaces root must NOT be deleted (#28818).
 

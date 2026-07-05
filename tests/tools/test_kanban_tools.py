@@ -311,6 +311,46 @@ def test_complete_happy_path(worker_env):
         conn.close()
 
 
+def test_complete_review_gates_document_artifact_in_scratch_workspace(worker_env):
+    """Document deliverables from scratch require human Done confirmation."""
+    from hermes_cli import kanban_db as kb
+
+    conn = kb.connect()
+    try:
+        task = kb.get_task(conn, worker_env)
+        assert task is not None
+        ws = kb.resolve_workspace(task)
+        kb.set_workspace_path(conn, worker_env, ws)
+        artifact = ws / "business-interview-guide.md"
+        artifact.write_text("# guide\n", encoding="utf-8")
+    finally:
+        conn.close()
+
+    from tools import kanban_tools as kt
+    out = kt._handle_complete({
+        "summary": "drafted guide for review",
+        "artifacts": [str(artifact)],
+    })
+    d = json.loads(out)
+    assert d["ok"] is True
+    assert d["status"] == "blocked"
+
+    conn = kb.connect()
+    try:
+        task = kb.get_task(conn, worker_env)
+        assert task is not None
+        assert task.status == "blocked"
+        assert task.block_kind == "needs_input"
+        run = kb.latest_run(conn, worker_env)
+        assert run is not None
+        assert run.outcome == "blocked"
+        assert run.summary is not None
+        assert "review-required" in run.summary
+    finally:
+        conn.close()
+    assert ws.exists(), "scratch workspace must survive until the human marks Done"
+
+
 def test_complete_metadata_round_trips_through_show(worker_env):
     """Structured completion metadata should be visible to downstream agents."""
     from tools import kanban_tools as kt
