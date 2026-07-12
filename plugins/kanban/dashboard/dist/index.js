@@ -3178,9 +3178,9 @@
     return best;
   }
 
-  // Split a pasted multi-line list into individual task titles. A single
-  // (possibly wrapped) line stays a single task. List markers (-, *, •, 1., 1))
-  // are stripped.
+  // Split only an explicit pasted list into individual task titles. Detailed
+  // multi-line prose must remain one task; batch mode activates only when every
+  // non-empty line begins with a list marker (-, *, •, ·, 1., 1)).
   function parseTaskListItems(text) {
     const raw = String(text || "").trim();
     if (!raw) return [];
@@ -3188,8 +3188,10 @@
       .map(function (l) { return l.trim(); })
       .filter(function (l) { return l.length > 0; });
     if (lines.length <= 1) return [raw];
+    const listMarker = /^(?:[-*•·]|\d+[.)])\s+/;
+    if (!lines.every(function (l) { return listMarker.test(l); })) return [raw];
     return lines
-      .map(function (l) { return l.replace(/^(?:[-*•·]|\d+[.)])\s*/, "").trim(); })
+      .map(function (l) { return l.replace(listMarker, "").trim(); })
       .filter(function (l) { return l.length > 0; });
   }
 
