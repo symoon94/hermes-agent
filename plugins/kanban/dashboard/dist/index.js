@@ -1221,10 +1221,14 @@
           h(InlineCreate, {
             columnName: "triage",
             allTasks: boardData.columns.reduce(function (acc, c) { return acc.concat(c.tasks); }, []),
-            onSubmit: function (body) {
+            onSubmit: function (body, meta) {
               return createTask(Object.assign({}, body, { triage: true })).then(function (res) {
+                // In batch (multi-line list) mode, keep the form open and do
+                // not pop the drawer for every created task.
+                if (meta && meta.batch) return res;
                 setShowGlobalCreate(false);
                 if (res && res.id) setSelectedTaskId(res.id);
+                return res;
               });
             },
             onCancel: function () { setShowGlobalCreate(false); },
@@ -2881,8 +2885,11 @@
       showCreate ? h(InlineCreate, {
         columnName: props.column.name,
         allTasks: props.allTasks,
-        onSubmit: function (body) {
-          props.onCreate(body).then(function () { setShowCreate(false); });
+        onSubmit: function (body, meta) {
+          return props.onCreate(body).then(function (res) {
+            if (!(meta && meta.batch)) setShowCreate(false);
+            return res;
+          });
         },
         onCancel: function () { setShowCreate(false); },
       }) : null,
@@ -3119,6 +3126,73 @@
   // Inline create (with parent selector)
   // -------------------------------------------------------------------------
 
+  // ---- Duplicate detection + multi-line list parsing for task creation ----
+
+  function normalizeTitleForDup(s) {
+    return String(s || "")
+      .toLowerCase()
+      .replace(/[`"'“”‘’\[\](){}<>.,:;!?~\-_/\\|+*#@]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function titleBigrams(s) {
+    const out = new Map();
+    for (let i = 0; i < s.length - 1; i++) {
+      const bg = s.slice(i, i + 2);
+      out.set(bg, (out.get(bg) || 0) + 1);
+    }
+    return out;
+  }
+
+  // Dice coefficient over character bigrams (works for Korean + English).
+  function titleSimilarity(a, b) {
+    if (!a || !b) return 0;
+    if (a === b) return 1;
+    if (a.length < 2 || b.length < 2) return a === b ? 1 : 0;
+    const ba = titleBigrams(a), bb = titleBigrams(b);
+    let overlap = 0, ta = 0, tb = 0;
+    ba.forEach(function (n) { ta += n; });
+    bb.forEach(function (n) { tb += n; });
+    ba.forEach(function (n, bg) { overlap += Math.min(n, bb.get(bg) || 0); });
+    if (ta + tb === 0) return 0;
+    return (2 * overlap) / (ta + tb);
+  }
+
+  const DUP_SIMILARITY_THRESHOLD = 0.8;
+
+  // Returns { id, title, score, exact } for the best existing match, or null.
+  function findSimilarTask(title, allTasks) {
+    const norm = normalizeTitleForDup(title);
+    if (!norm) return null;
+    let best = null;
+    for (const task of allTasks || []) {
+      const tn = normalizeTitleForDup(task.title);
+      if (!tn) continue;
+      const exact = tn === norm;
+      const score = exact ? 1 : titleSimilarity(norm, tn);
+      if (score >= DUP_SIMILARITY_THRESHOLD && (!best || score > best.score)) {
+        best = { id: task.id, title: task.title || "", score, exact };
+      }
+    }
+    return best;
+  }
+
+  // Split a pasted multi-line list into individual task titles. A single
+  // (possibly wrapped) line stays a single task. List markers (-, *, •, 1., 1))
+  // are stripped.
+  function parseTaskListItems(text) {
+    const raw = String(text || "").trim();
+    if (!raw) return [];
+    const lines = raw.split(/\r?\n/)
+      .map(function (l) { return l.trim(); })
+      .filter(function (l) { return l.length > 0; });
+    if (lines.length <= 1) return [raw];
+    return lines
+      .map(function (l) { return l.replace(/^(?:[-*•·]|\d+[.)])\s*/, "").trim(); })
+      .filter(function (l) { return l.length > 0; });
+  }
+
   function InlineCreate(props) {
     const { t } = useI18n();
     const [title, setTitle] = useState("");
@@ -3148,11 +3222,9 @@
       setGoalMode(false); setGoalMaxTurns("");
     };
 
-    const submit = function () {
-      const trimmed = title.trim();
-      if (!trimmed || submitting) return;
+    const buildBody = function (itemTitle) {
       const body = {
-        title: trimmed,
+        title: itemTitle,
         assignee: assignee.trim() || null,
         triage: props.columnName === "triage",
       };
@@ -3182,10 +3254,84 @@
         const gmt = parseInt(goalMaxTurns, 10);
         if (Number.isFinite(gmt) && gmt > 0) body.goal_max_turns = gmt;
       }
+      return body;
+    };
+
+    const submit = function () {
+      const trimmed = title.trim();
+      if (!trimmed || submitting) return;
+      const items = parseTaskListItems(trimmed);
+      const allTasks = props.allTasks || [];
+
+      if (items.length <= 1) {
+        // Single task: if a similar/identical task already exists, ask
+        // before creating. Cancel keeps the form so nothing is lost.
+        const dup = findSimilarTask(items[0] || trimmed, allTasks);
+        if (dup) {
+          const kind = dup.exact ? "identical" : "similar";
+          const ok = window.confirm(
+            `A ${kind} task already exists:\n\n  ${dup.id} — ${dup.title}\n\nCreate a new task anyway?\n(OK = create anyway, Cancel = don't create)`);
+          if (!ok) return;
+        }
+        setSubmitting(true);
+        Promise.resolve(props.onSubmit(buildBody(items[0] || trimmed)))
+          .then(function () { resetForm(); })
+          .catch(function (e) { window.alert(String((e && e.message) || e || "Create failed")); })
+          .finally(function () { setSubmitting(false); });
+        return;
+      }
+
+      // Multi-line list: create one task per line, skipping items that
+      // duplicate an existing task or an earlier line in the same batch.
+      const seen = new Set();
+      const toCreate = [];
+      const skipped = [];
+      for (const item of items) {
+        const norm = normalizeTitleForDup(item);
+        if (norm && seen.has(norm)) {
+          skipped.push({ title: item, reason: "duplicate within this list" });
+          continue;
+        }
+        const dup = findSimilarTask(item, allTasks);
+        if (dup) {
+          skipped.push({ title: item, reason: `${dup.exact ? "same as" : "similar to"} ${dup.id} — ${dup.title.slice(0, 60)}` });
+          continue;
+        }
+        if (norm) seen.add(norm);
+        toCreate.push(item);
+      }
+      if (toCreate.length === 0) {
+        window.alert(
+          `All ${items.length} items look like duplicates of existing tasks — nothing to create.\n\n` +
+          skipped.map(function (s) { return `• ${s.title}\n    ↳ ${s.reason}`; }).join("\n"));
+        return;
+      }
+      let msg = `Create ${toCreate.length} task(s) from this list?\n\n` +
+        toCreate.map(function (t2) { return `• ${t2}`; }).join("\n");
+      if (skipped.length > 0) {
+        msg += `\n\nSkipping ${skipped.length} duplicate(s):\n` +
+          skipped.map(function (s) { return `• ${s.title}\n    ↳ ${s.reason}`; }).join("\n");
+      }
+      if (!window.confirm(msg)) return;
       setSubmitting(true);
-      Promise.resolve(props.onSubmit(body))
-        .then(function () { resetForm(); })
-        .catch(function (e) { window.alert(String((e && e.message) || e || "Create failed")); })
+      let chain = Promise.resolve();
+      const failures = [];
+      toCreate.forEach(function (itemTitle) {
+        chain = chain.then(function () {
+          return Promise.resolve(props.onSubmit(buildBody(itemTitle), { batch: true }))
+            .catch(function (e) {
+              failures.push(`${itemTitle}: ${String((e && e.message) || e)}`);
+            });
+        });
+      });
+      chain
+        .then(function () {
+          if (failures.length > 0) {
+            window.alert(`Some tasks failed to create:\n${failures.join("\n")}`);
+          }
+          resetForm();
+          if (props.onCancel) props.onCancel();
+        })
         .finally(function () { setSubmitting(false); });
     };
 
@@ -3205,8 +3351,8 @@
           if (e.key === "Escape") props.onCancel();
         },
         placeholder: props.columnName === "triage"
-          ? tx(t, "triagePlaceholder", "Rough idea — AI will spec it…")
-          : tx(t, "taskTitlePlaceholder", "New task title…"),
+          ? tx(t, "triagePlaceholder", "Rough idea — AI will spec it… (paste a multi-line list to create one task per line; Shift+Enter for newline)")
+          : tx(t, "taskTitlePlaceholder", "New task title… (paste a multi-line list to create one task per line)"),
         autoFocus: true,
         className: "hermes-kanban-inline-textarea text-sm min-h-[2rem] max-h-32 resize-y w-full border border-input bg-transparent px-2 py-1 rounded-md focus:outline-none focus:ring-2 focus:ring-ring",
         rows: 2,
