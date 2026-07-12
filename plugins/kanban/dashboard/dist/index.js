@@ -2592,14 +2592,47 @@
 
   function PriorityList(props) {
     const { t } = useI18n();
-    const tasks = useMemo(function () {
+    const [hideDone, setHideDone] = useState(function () {
+      try { return window.localStorage.getItem("hermes.kanban.priorityHideDone") === "1"; }
+      catch (_e) { return false; }
+    });
+    const allTasks = useMemo(function () {
       return flattenBoardTasks(props.board).sort(prioritySort);
     }, [props.board]);
+    const doneCount = useMemo(function () {
+      return allTasks.filter(function (task) { return task.status === "done"; }).length;
+    }, [allTasks]);
+    const tasks = hideDone
+      ? allTasks.filter(function (task) { return task.status !== "done"; })
+      : allTasks;
+    const filterBar = h("div", { className: "hermes-kanban-priority-filterbar" },
+      h("label", {
+        className: "hermes-kanban-priority-filter-toggle",
+        title: "Hide tasks in Done from the priority list. The board and database are unchanged.",
+      },
+        h(Checkbox, {
+          checked: hideDone,
+          onCheckedChange: function (checked) {
+            const next = checked === true;
+            setHideDone(next);
+            try { window.localStorage.setItem("hermes.kanban.priorityHideDone", next ? "1" : "0"); } catch (_e) {}
+          },
+        }),
+        tx(t, "hideDone", "Hide done"),
+        doneCount > 0 ? h("span", { className: "hermes-kanban-priority-filter-count" }, `(${doneCount})`) : null,
+      ),
+    );
     if (tasks.length === 0) {
       return h("div", { className: "hermes-kanban-priority-list hermes-kanban-priority-empty" },
-        tx(t, "noTasks", "— no tasks —"));
+        filterBar,
+        h("div", { className: "hermes-kanban-priority-empty-msg" },
+          hideDone && doneCount > 0
+            ? tx(t, "allDoneHidden", "— all remaining tasks are done (hidden by filter) —")
+            : tx(t, "noTasks", "— no tasks —")),
+      );
     }
     return h("div", { className: "hermes-kanban-priority-list" },
+      filterBar,
       tasks.map(function (task) {
         return h(PriorityRow, {
           key: task.id,

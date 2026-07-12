@@ -233,6 +233,37 @@
   border-radius: var(--radius-sm, 0.25rem);
 }
 
+.hermes-kanban-priority-filterbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.25rem;
+  font-size: 0.75rem;
+  color: var(--color-muted-foreground);
+}
+
+.hermes-kanban-priority-empty .hermes-kanban-priority-filterbar {
+  justify-content: center;
+  padding-bottom: 0.75rem;
+}
+
+.hermes-kanban-priority-filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.hermes-kanban-priority-filter-count {
+  color: var(--color-muted-foreground);
+  opacity: 0.8;
+}
+
+.hermes-kanban-priority-empty-msg {
+  padding: 0.5rem 0;
+}
+
 .hermes-kanban-priority-row {
   display: grid;
   grid-template-columns: auto auto minmax(7rem, auto) minmax(12rem, 1fr) auto;
