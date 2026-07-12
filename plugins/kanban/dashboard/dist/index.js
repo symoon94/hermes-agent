@@ -1221,11 +1221,8 @@
           h(InlineCreate, {
             columnName: "triage",
             allTasks: boardData.columns.reduce(function (acc, c) { return acc.concat(c.tasks); }, []),
-            onSubmit: function (body, meta) {
+            onSubmit: function (body) {
               return createTask(Object.assign({}, body, { triage: true })).then(function (res) {
-                // In batch (multi-line list) mode, keep the form open and do
-                // not pop the drawer for every created task.
-                if (meta && meta.batch) return res;
                 setShowGlobalCreate(false);
                 if (res && res.id) setSelectedTaskId(res.id);
                 return res;
@@ -2885,9 +2882,9 @@
       showCreate ? h(InlineCreate, {
         columnName: props.column.name,
         allTasks: props.allTasks,
-        onSubmit: function (body, meta) {
+        onSubmit: function (body) {
           return props.onCreate(body).then(function (res) {
-            if (!(meta && meta.batch)) setShowCreate(false);
+            setShowCreate(false);
             return res;
           });
         },
@@ -3178,23 +3175,6 @@
     return best;
   }
 
-  // Split only an explicit pasted list into individual task titles. Detailed
-  // multi-line prose must remain one task; batch mode activates only when every
-  // non-empty line begins with a list marker (-, *, •, ·, 1., 1)).
-  function parseTaskListItems(text) {
-    const raw = String(text || "").trim();
-    if (!raw) return [];
-    const lines = raw.split(/\r?\n/)
-      .map(function (l) { return l.trim(); })
-      .filter(function (l) { return l.length > 0; });
-    if (lines.length <= 1) return [raw];
-    const listMarker = /^(?:[-*•·]|\d+[.)])\s+/;
-    if (!lines.every(function (l) { return listMarker.test(l); })) return [raw];
-    return lines
-      .map(function (l) { return l.replace(listMarker, "").trim(); })
-      .filter(function (l) { return l.length > 0; });
-  }
-
   function InlineCreate(props) {
     const { t } = useI18n();
     const [title, setTitle] = useState("");
@@ -3262,78 +3242,21 @@
     const submit = function () {
       const trimmed = title.trim();
       if (!trimmed || submitting) return;
-      const items = parseTaskListItems(trimmed);
-      const allTasks = props.allTasks || [];
 
-      if (items.length <= 1) {
-        // Single task: if a similar/identical task already exists, ask
-        // before creating. Cancel keeps the form so nothing is lost.
-        const dup = findSimilarTask(items[0] || trimmed, allTasks);
-        if (dup) {
-          const kind = dup.exact ? "identical" : "similar";
-          const ok = window.confirm(
-            `A ${kind} task already exists:\n\n  ${dup.id} — ${dup.title}\n\nCreate a new task anyway?\n(OK = create anyway, Cancel = don't create)`);
-          if (!ok) return;
-        }
-        setSubmitting(true);
-        Promise.resolve(props.onSubmit(buildBody(items[0] || trimmed)))
-          .then(function () { resetForm(); })
-          .catch(function (e) { window.alert(String((e && e.message) || e || "Create failed")); })
-          .finally(function () { setSubmitting(false); });
-        return;
+      // Add task / AI triage always creates exactly one task. Multi-line
+      // input is detailed task text, never a batch instruction.
+      const dup = findSimilarTask(trimmed, props.allTasks || []);
+      if (dup) {
+        const kind = dup.exact ? "identical" : "similar";
+        const ok = window.confirm(
+          `A ${kind} task already exists:\n\n  ${dup.id} — ${dup.title}\n\nCreate a new task anyway?\n(OK = create anyway, Cancel = don't create)`);
+        if (!ok) return;
       }
 
-      // Multi-line list: create one task per line, skipping items that
-      // duplicate an existing task or an earlier line in the same batch.
-      const seen = new Set();
-      const toCreate = [];
-      const skipped = [];
-      for (const item of items) {
-        const norm = normalizeTitleForDup(item);
-        if (norm && seen.has(norm)) {
-          skipped.push({ title: item, reason: "duplicate within this list" });
-          continue;
-        }
-        const dup = findSimilarTask(item, allTasks);
-        if (dup) {
-          skipped.push({ title: item, reason: `${dup.exact ? "same as" : "similar to"} ${dup.id} — ${dup.title.slice(0, 60)}` });
-          continue;
-        }
-        if (norm) seen.add(norm);
-        toCreate.push(item);
-      }
-      if (toCreate.length === 0) {
-        window.alert(
-          `All ${items.length} items look like duplicates of existing tasks — nothing to create.\n\n` +
-          skipped.map(function (s) { return `• ${s.title}\n    ↳ ${s.reason}`; }).join("\n"));
-        return;
-      }
-      let msg = `Create ${toCreate.length} task(s) from this list?\n\n` +
-        toCreate.map(function (t2) { return `• ${t2}`; }).join("\n");
-      if (skipped.length > 0) {
-        msg += `\n\nSkipping ${skipped.length} duplicate(s):\n` +
-          skipped.map(function (s) { return `• ${s.title}\n    ↳ ${s.reason}`; }).join("\n");
-      }
-      if (!window.confirm(msg)) return;
       setSubmitting(true);
-      let chain = Promise.resolve();
-      const failures = [];
-      toCreate.forEach(function (itemTitle) {
-        chain = chain.then(function () {
-          return Promise.resolve(props.onSubmit(buildBody(itemTitle), { batch: true }))
-            .catch(function (e) {
-              failures.push(`${itemTitle}: ${String((e && e.message) || e)}`);
-            });
-        });
-      });
-      chain
-        .then(function () {
-          if (failures.length > 0) {
-            window.alert(`Some tasks failed to create:\n${failures.join("\n")}`);
-          }
-          resetForm();
-          if (props.onCancel) props.onCancel();
-        })
+      Promise.resolve(props.onSubmit(buildBody(trimmed)))
+        .then(function () { resetForm(); })
+        .catch(function (e) { window.alert(String((e && e.message) || e || "Create failed")); })
         .finally(function () { setSubmitting(false); });
     };
 
@@ -3353,8 +3276,8 @@
           if (e.key === "Escape") props.onCancel();
         },
         placeholder: props.columnName === "triage"
-          ? tx(t, "triagePlaceholder", "Rough idea — AI will spec it… (paste a multi-line list to create one task per line; Shift+Enter for newline)")
-          : tx(t, "taskTitlePlaceholder", "New task title… (paste a multi-line list to create one task per line)"),
+          ? tx(t, "triagePlaceholder", "Describe one task in as much detail as needed… (Shift+Enter for newline)")
+          : tx(t, "taskTitlePlaceholder", "Describe one task… (Shift+Enter for newline)"),
         autoFocus: true,
         className: "hermes-kanban-inline-textarea text-sm min-h-[2rem] max-h-32 resize-y w-full border border-input bg-transparent px-2 py-1 rounded-md focus:outline-none focus:ring-2 focus:ring-ring",
         rows: 2,
