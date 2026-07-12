@@ -1550,15 +1550,16 @@ def test_list_tasks_order_by(kanban_home):
 
         # Sort by title ASC
         by_title = kb.list_tasks(conn, order_by="title")
-        assert [t.id for t in by_title] == [t_a, t_b, t_c]
+        assert [t.id for t in by_title] == [t_a, t_b, t_c, t_unranked]
 
         # Sort by assignee
         kb.assign_task(conn, t_a, "alice")
         kb.assign_task(conn, t_b, "bob")
         kb.assign_task(conn, t_c, "alice")
         by_assignee = kb.list_tasks(conn, order_by="assignee")
-        # alice's tasks first (alphabetically), then bob's
-        assignees = [t.assignee for t in by_assignee]
+        # alice's tasks before bob's; the unassigned unranked task's NULL
+        # assignee placement is backend-dependent, so compare filtered.
+        assignees = [t.assignee for t in by_assignee if t.assignee]
         assert assignees[:2] == ["alice", "alice"]
         assert assignees[2] == "bob"
 
