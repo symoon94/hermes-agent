@@ -621,8 +621,42 @@ def create_routine(payload: RoutineCreateBody, board: Optional[str] = Query(None
             sort_order=payload.sort_order,
             source_task_id=payload.source_task_id,
         )
+        # New routines enter the checklist according to the same values-aware
+        # policy instead of appending by creation time.
+        from hermes_cli import kanban_routine_priority
+
+        ranking = kanban_routine_priority.rerank_routines(conn)
         item = next((r for r in kanban_db.list_routines(conn, include_inactive=True) if r.id == rid), None)
-        return {"routine": _routine_dict(item) if item else {"id": rid}}
+        return {
+            "routine": _routine_dict(item) if item else {"id": rid},
+            "ranking": {
+                "ordered_ids": ranking.ordered_ids,
+                "reason": ranking.reason,
+                "source": ranking.source,
+                "model": ranking.model,
+            },
+        }
+    finally:
+        conn.close()
+
+
+@router.post("/routines/rerank")
+def rerank_routines(board: Optional[str] = Query(None)):
+    """Reorder active routines using the configured values-aware GPT."""
+    board = _resolve_board(board)
+    conn = _conn(board=board)
+    try:
+        from hermes_cli import kanban_routine_priority
+
+        decision = kanban_routine_priority.rerank_routines(conn)
+        return {
+            "ok": True,
+            "ordered_ids": decision.ordered_ids,
+            "reason": decision.reason,
+            "source": decision.source,
+            "model": decision.model,
+            "routines": [_routine_dict(r) for r in kanban_db.list_routines(conn)],
+        }
     finally:
         conn.close()
 

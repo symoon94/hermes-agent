@@ -920,6 +920,13 @@
         .then(loadBoard).catch(function (e) { setError(String(e.message || e)); });
     }, [loadBoard, board]);
 
+    const rerankRoutines = useCallback(function () {
+      return SDK.fetchJSON(withBoard(`${API}/routines/rerank`, board), { method: "POST" })
+        .then(function (res) {
+          return Promise.resolve(loadBoard()).then(function () { return res; });
+        });
+    }, [loadBoard, board]);
+
     const promoteRoutine = useCallback(function (routine) {
       setRoutineNotice({ id: routine.id, status: "busy", text: `Promoting “${routine.title}”…` });
       return createTask({
@@ -1182,6 +1189,7 @@
           onToggle: toggleRoutine,
           onArchive: archiveRoutine,
           onPromote: promoteRoutine,
+          onRerank: rerankRoutines,
         }),
         h(BoardToolbar, {
           board: boardData,
@@ -2193,6 +2201,8 @@
     const [title, setTitle] = useState("");
     const [frequency, setFrequency] = useState("daily");
     const [adding, setAdding] = useState(false);
+    const [ranking, setRanking] = useState(false);
+    const [rankMsg, setRankMsg] = useState(null);
     const daily = routines.filter(function (r) { return r.frequency === "daily" || r.frequency === "weekdays"; });
     const weekly = routines.filter(function (r) { return r.frequency === "weekly"; });
     const other = routines.filter(function (r) { return daily.indexOf(r) === -1 && weekly.indexOf(r) === -1; });
@@ -2244,10 +2254,30 @@
       h("div", { className: "hermes-kanban-routine-head" },
         h("div", null,
           h("div", { className: "hermes-kanban-routine-label" }, "Routine checklist"),
-          h("div", { className: "hermes-kanban-routine-sub" }, "Not ranked. Repeating life/work rhythm lives outside the priority queue."),
+          h("div", { className: "hermes-kanban-routine-sub" }, "Values-ranked within each frequency group · recurring rhythm stays outside the task queue."),
         ),
-        h("div", { className: "hermes-kanban-routine-count" }, `${done}/${routines.length}`),
+        h("div", { className: "hermes-kanban-routine-head-actions" },
+          h("button", {
+            type: "button",
+            className: "hermes-kanban-routine-rank",
+            disabled: ranking || !props.onRerank || routines.length < 2,
+            title: "Reorder routines using your values-aware GPT priority policy",
+            onClick: function () {
+              if (ranking || !props.onRerank) return;
+              setRanking(true); setRankMsg(null);
+              Promise.resolve(props.onRerank()).then(function (res) {
+                setRankMsg({ ok: true, text: `Ranked by ${res.model || res.source}: ${res.reason || "updated"}` });
+              }).catch(function (err) {
+                setRankMsg({ ok: false, text: "Routine ranking failed: " + (err.message || String(err)) });
+              }).finally(function () { setRanking(false); });
+            },
+          }, ranking ? "Ranking…" : "↕ Rank"),
+          h("div", { className: "hermes-kanban-routine-count" }, `${done}/${routines.length}`),
+        ),
       ),
+      rankMsg ? h("div", {
+        className: rankMsg.ok ? "hermes-kanban-msg-ok" : "hermes-kanban-msg-err",
+      }, rankMsg.text) : null,
       h("form", { className: "hermes-kanban-routine-add", onSubmit: submit },
         h(Input, {
           value: title,
