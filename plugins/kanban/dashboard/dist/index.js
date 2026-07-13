@@ -2203,9 +2203,12 @@
     const [adding, setAdding] = useState(false);
     const [ranking, setRanking] = useState(false);
     const [rankMsg, setRankMsg] = useState(null);
-    const daily = routines.filter(function (r) { return r.frequency === "daily" || r.frequency === "weekdays"; });
-    const weekly = routines.filter(function (r) { return r.frequency === "weekly"; });
-    const other = routines.filter(function (r) { return daily.indexOf(r) === -1 && weekly.indexOf(r) === -1; });
+    const ordered = routines.slice().sort(function (a, b) {
+      const ao = Number(a.sort_order || 0);
+      const bo = Number(b.sort_order || 0);
+      if (ao !== bo) return ao - bo;
+      return String(a.id || "").localeCompare(String(b.id || ""));
+    });
     function submit(e) {
       if (e && e.preventDefault) e.preventDefault();
       const clean = title.trim();
@@ -2219,7 +2222,7 @@
       if (!items.length) return null;
       return h("div", { className: "hermes-kanban-routine-group" },
         h("div", { className: "hermes-kanban-routine-group-title" }, label),
-        items.map(function (r) {
+        items.map(function (r, index) {
           const ps = props.promoteState && props.promoteState.id === r.id ? props.promoteState : null;
           return h("div", { key: r.id, className: "hermes-kanban-routine-item" + (r.checked_today ? " hermes-kanban-routine-item--done" : "") },
             h("div", { className: "hermes-kanban-routine-main" },
@@ -2229,7 +2232,10 @@
                   checked: !!r.checked_today,
                   onChange: function (e) { props.onToggle(r, e.target.checked); },
                 }),
+                h("span", { className: "hermes-kanban-routine-rank-index" }, `P${index + 1}`),
                 h("span", { className: "hermes-kanban-routine-title", title: r.body || r.title }, r.title),
+                h("span", { className: "hermes-kanban-routine-frequency" },
+                  r.frequency === "weekly" ? "Weekly" : r.frequency === "weekdays" ? "Weekdays" : r.frequency === "daily" ? "Daily" : r.frequency),
               ),
               ps ? h("div", {
                 className: "hermes-kanban-routine-feedback hermes-kanban-routine-feedback--" + ps.status,
@@ -2254,7 +2260,7 @@
       h("div", { className: "hermes-kanban-routine-head" },
         h("div", null,
           h("div", { className: "hermes-kanban-routine-label" }, "Routine checklist"),
-          h("div", { className: "hermes-kanban-routine-sub" }, "Values-ranked within each frequency group · recurring rhythm stays outside the task queue."),
+          h("div", { className: "hermes-kanban-routine-sub" }, "One GPT-ranked priority order across daily and weekly routines."),
         ),
         h("div", { className: "hermes-kanban-routine-head-actions" },
           h("button", {
@@ -2296,10 +2302,8 @@
       ),
       empty
         ? h("div", { className: "hermes-kanban-routine-empty" }, "No routines yet. Add daily/weekly checklist items here; keep one-off work in the ranked task list.")
-        : h("div", { className: "hermes-kanban-routine-grid" },
-            group("Today", daily),
-            group("This week", weekly),
-            group("Other", other),
+        : h("div", { className: "hermes-kanban-routine-grid hermes-kanban-routine-grid--priority" },
+            group("Priority order", ordered),
           ),
     );
   }
