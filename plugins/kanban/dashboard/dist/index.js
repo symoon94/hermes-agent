@@ -1259,7 +1259,7 @@
             })
           : h(BoardColumns, {
               board: filteredBoard,
-              laneByProfile:
+              laneByProfile,
               selectedIds,
               failedIds,
               draggingTaskId,
