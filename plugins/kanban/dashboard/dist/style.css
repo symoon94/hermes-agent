@@ -203,7 +203,7 @@
   border-radius: 999px;
   background: var(--color-muted-foreground);
 }
-.hermes-kanban-dot-triage   { background: #b47dd6; }  /* lilac — fresh/unspecified */
+.hermes-kanban-dot-triage   { background: #b47dd6; }  /* lilac — unique/unspecified */
 .hermes-kanban-dot-todo     { background: var(--color-muted-foreground); }
 .hermes-kanban-dot-scheduled{ background: #8b5cf6; }  /* violet */
 .hermes-kanban-dot-ready    { background: #d4b348; }  /* amber */

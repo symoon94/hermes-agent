@@ -151,7 +151,7 @@
     archived: "Archived",
   };
   const FALLBACK_COLUMN_HELP = {
-    triage: "Raw ideas — a specifier will flesh out the spec",
+    triage: "Created immediately; AI checks duplicates before specification/decomposition",
     todo: "Waiting on dependencies or unassigned",
     scheduled: "Time-based follow-up; dispatcher wakes it later",
     ready: "Dependencies satisfied; assign a profile to dispatch",
@@ -1251,7 +1251,7 @@
             })
           : h(BoardColumns, {
               board: filteredBoard,
-              laneByProfile,
+              laneByProfile:
               selectedIds,
               failedIds,
               draggingTaskId,
@@ -3123,58 +3123,6 @@
   // Inline create (with parent selector)
   // -------------------------------------------------------------------------
 
-  // ---- Duplicate detection + multi-line list parsing for task creation ----
-
-  function normalizeTitleForDup(s) {
-    return String(s || "")
-      .toLowerCase()
-      .replace(/[`"'“”‘’\[\](){}<>.,:;!?~\-_/\\|+*#@]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-  }
-
-  function titleBigrams(s) {
-    const out = new Map();
-    for (let i = 0; i < s.length - 1; i++) {
-      const bg = s.slice(i, i + 2);
-      out.set(bg, (out.get(bg) || 0) + 1);
-    }
-    return out;
-  }
-
-  // Dice coefficient over character bigrams (works for Korean + English).
-  function titleSimilarity(a, b) {
-    if (!a || !b) return 0;
-    if (a === b) return 1;
-    if (a.length < 2 || b.length < 2) return a === b ? 1 : 0;
-    const ba = titleBigrams(a), bb = titleBigrams(b);
-    let overlap = 0, ta = 0, tb = 0;
-    ba.forEach(function (n) { ta += n; });
-    bb.forEach(function (n) { tb += n; });
-    ba.forEach(function (n, bg) { overlap += Math.min(n, bb.get(bg) || 0); });
-    if (ta + tb === 0) return 0;
-    return (2 * overlap) / (ta + tb);
-  }
-
-  const DUP_SIMILARITY_THRESHOLD = 0.8;
-
-  // Returns { id, title, score, exact } for the best existing match, or null.
-  function findSimilarTask(title, allTasks) {
-    const norm = normalizeTitleForDup(title);
-    if (!norm) return null;
-    let best = null;
-    for (const task of allTasks || []) {
-      const tn = normalizeTitleForDup(task.title);
-      if (!tn) continue;
-      const exact = tn === norm;
-      const score = exact ? 1 : titleSimilarity(norm, tn);
-      if (score >= DUP_SIMILARITY_THRESHOLD && (!best || score > best.score)) {
-        best = { id: task.id, title: task.title || "", score, exact };
-      }
-    }
-    return best;
-  }
-
   function InlineCreate(props) {
     const { t } = useI18n();
     const [title, setTitle] = useState("");
@@ -3243,18 +3191,12 @@
       const trimmed = title.trim();
       if (!trimmed || submitting) return;
 
-      // Add task / AI triage always creates exactly one task. Multi-line
-      // input is detailed task text, never a batch instruction.
-      const dup = findSimilarTask(trimmed, props.allTasks || []);
-      if (dup) {
-        const kind = dup.exact ? "identical" : "similar";
-        const ok = window.confirm(
-          `A ${kind} task already exists:\n\n  ${dup.id} — ${dup.title}\n\nCreate a new task anyway?\n(OK = create anyway, Cancel = don't create)`);
-        if (!ok) return;
-      }
-
+      // Add task / AI triage always creates exactly one durable Triage card.
+      // Create returns immediately; the gateway runs semantic duplicate
+      // detection before values-aware priority and auto-decomposition.
+      const body = buildBody(trimmed);
       setSubmitting(true);
-      Promise.resolve(props.onSubmit(buildBody(trimmed)))
+      Promise.resolve(props.onSubmit(body))
         .then(function () { resetForm(); })
         .catch(function (e) { window.alert(String((e && e.message) || e || "Create failed")); })
         .finally(function () { setSubmitting(false); });

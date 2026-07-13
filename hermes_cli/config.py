@@ -1564,6 +1564,26 @@ DEFAULT_CONFIG = {
             "timeout": 120,
             "extra_body": {},
         },
+        # Semantic duplicate detector for Add task / AI triage. Compares the
+        # proposed detailed task against active board tickets before creation.
+        "kanban_duplicate": {
+            "provider": "auto",
+            "model": "",
+            "base_url": "",
+            "api_key": "",
+            "timeout": 120,
+            "extra_body": {},
+        },
+        # Value-aware priority insertion. Uses the current ranked list plus
+        # the user's real-life and secondary Jyotish planning signals.
+        "kanban_priority": {
+            "provider": "auto",
+            "model": "",
+            "base_url": "",
+            "api_key": "",
+            "timeout": 120,
+            "extra_body": {},
+        },
         # Kanban decomposer — decomposes a triage task into a graph of
         # child tasks routed to specialist profiles by description.
         # Invoked by ``hermes kanban decompose`` and the kanban

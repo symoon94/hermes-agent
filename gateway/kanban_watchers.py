@@ -1138,6 +1138,7 @@ class GatewayKanbanWatchersMixin:
             """
             try:
                 from hermes_cli import kanban_decompose as _decomp
+                from hermes_cli import kanban_intake as _intake
             except Exception as exc:  # pragma: no cover
                 logger.warning(
                     "kanban auto-decompose: import failed (%s); skipping", exc,
@@ -1172,6 +1173,30 @@ class GatewayKanbanWatchersMixin:
                         if attempted >= auto_decompose_per_tick:
                             break
                         attempted += 1
+                        # Fresh Triage cards must pass semantic duplicate
+                        # detection before the existing decomposer. Duplicate
+                        # cards archive here; unavailable LLMs leave the card in
+                        # Triage for a later gateway tick retry.
+                        try:
+                            gate = _intake.process_triage_task(tid, board=slug)
+                        except Exception:
+                            logger.exception(
+                                "kanban triage intake: duplicate check crashed on %s",
+                                tid,
+                            )
+                            continue
+                        if gate.get("state") == "duplicate_archived":
+                            logger.info(
+                                "kanban triage intake [%s]: %s archived as duplicate",
+                                slug, tid,
+                            )
+                            continue
+                        if not gate.get("ok"):
+                            logger.debug(
+                                "kanban triage intake [%s]: %s deferred: %s",
+                                slug, tid, gate.get("state"),
+                            )
+                            continue
                         try:
                             outcome = _decomp.decompose_task(
                                 tid, author="auto-decomposer",

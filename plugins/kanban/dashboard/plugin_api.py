@@ -691,7 +691,10 @@ def create_task(payload: CreateTaskBody, board: Optional[str] = Query(None)):
             workspace_kind=payload.workspace_kind,
             workspace_path=payload.workspace_path,
             tenant=payload.tenant,
-            priority=payload.priority,
+            # Blank-priority Triage cards are captured immediately as P0. The
+            # gateway intake gate assigns values-aware rank only after proving
+            # the card is not a semantic duplicate.
+            priority=(0 if payload.triage and payload.priority is None else payload.priority),
             parents=payload.parents,
             triage=payload.triage,
             idempotency_key=payload.idempotency_key,

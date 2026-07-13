@@ -47,6 +47,15 @@ TIER2_HINTS = (
     "팀", "team", "제품", "product", "고객", "partner", "파트너",
     "big tech", "빅테크", "overseas", "해외", "global", "글로벌",
     "resume", "이력서", "interview", "면접", "portfolio", "포트폴리오",
+    # Practical expressions of the user's secondary Jyotish alignment:
+    # durable systems/technology (Capricorn + Saturn Aquarius), precise
+    # communication/partnership (Mercury/Venus/Jupiter + Libra D9), and work
+    # that protects the explicitly stated real-life values.
+    "platform", "플랫폼", "infrastructure", "인프라", "system", "시스템",
+    "reusable", "재사용", "communication", "커뮤니케이션", "language", "언어",
+    "negotiation", "협상", "partnership", "협업", "role", "역할",
+    "family", "가족", "health", "건강", "relationship", "관계",
+    "energy", "에너지", "stability", "안정",
 )
 TIER3_HINTS = (
     "study", "studying", "learn", "learning", "research", "til",
@@ -208,6 +217,15 @@ def decide_priority(conn: Any, *, title: str, body: Optional[str], tenant: Optio
             "- Strong desire to enjoy life, not optimize everything into obligation. Tasks that preserve energy, relationships, health, or daily enjoyment can outrank pure productivity chores.\n"
             "- Strong desire to work at an overseas big-tech company at least once. Tasks that build credible global-big-tech/FDE/product-engineering readiness, English communication, resume/portfolio, interview loops, or high-signal career options should rank higher.\n"
             "- Automation is intrinsically fun/energizing. Automation tasks get a positive boost when they also reduce repeated toil, improve team leverage, or create reusable agent/system capability.\n"
+            "Vedic/Jyotish self-analysis to use as a SECONDARY planning signal (never as fate or as a reason to override real deadlines, customer impact, family/health, finances, or safety):\n"
+            "- Sidereal D1 Sagittarius Lagna: expansion, overseas exposure, learning, teaching, and globally portable work are especially aligned.\n"
+            "- Strong Capricorn stellium (Sun/Mercury/Venus/Mars): values durable systems, disciplined execution, measurable long-term assets, responsibility, and practical leverage; avoid busywork with no compounding result.\n"
+            "- Cancer Moon in Ashlesha: strong strategic/relational sensitivity and pattern-reading; protect emotional energy and prefer work that resolves hidden complexity without creating unhealthy entanglement.\n"
+            "- Jupiter in Libra and D9 Libra Ascendant: partnership, balance, negotiation, design judgment, and fair role structures matter; tasks improving collaboration or explicit agreements get a positive signal.\n"
+            "- Saturn in Aquarius: long-horizon technology, systems, communities, and infrastructure are aligned, especially reusable platforms over one-off toil.\n"
+            "- D9 strengths (Venus Taurus, Mercury Virgo, Jupiter Pisces): favor quality, communication precision, service, craft, and work that combines practicality with humane impact.\n"
+            "- Current Venus Mahadasha (2015-2035): give a moderate positive signal to career/wealth-building, partnership, language/communication, quality of life, and family-supporting work—but timing is only advisory.\n"
+            "Translate these chart signals into practical value alignment, not supernatural certainty.\n"
             "Within a tier compare actual impact, deadlines, dependencies, reversibility, and whether the task unblocks other people.\n"
             "Return ONLY JSON with keys: insert_before_id (task id string or null), tier (1-4), realm ('Upstage'|'Private'|null), reason (short Korean).\n"
             "If the new card belongs at the end of the ranked list, use insert_before_id:null.\n\n"
