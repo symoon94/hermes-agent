@@ -3709,6 +3709,21 @@ class TestCodexAdapterPromptCacheKey:
         key = captured.get("prompt_cache_key")
         assert isinstance(key, str) and key.startswith("pck_")
 
+    def test_cache_key_skipped_when_installed_sdk_does_not_accept_it(self):
+        import inspect
+
+        adapter, captured = self._build_adapter()
+        create = adapter._client.responses.create
+        create.__signature__ = inspect.Signature([
+            inspect.Parameter("model", inspect.Parameter.KEYWORD_ONLY, default=None),
+            inspect.Parameter("input", inspect.Parameter.KEYWORD_ONLY, default=None),
+            inspect.Parameter("stream", inspect.Parameter.KEYWORD_ONLY, default=False),
+        ])
+
+        adapter.create(messages=[{"role": "user", "content": "hi"}])
+
+        assert "prompt_cache_key" not in captured
+
     def test_cache_key_stable_across_identical_prefix(self):
         """Same instructions + tools → same key (content-addressed, not per-call)."""
         a1, c1 = self._build_adapter()

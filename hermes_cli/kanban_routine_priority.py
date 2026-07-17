@@ -58,56 +58,77 @@ def decide_routine_order(items: list[dict[str, Any]]) -> RoutineRankDecision:
         return RoutineRankDecision([items[0]["id"]], "활성 루틴이 하나입니다.", "single")
 
     fallback = _fallback_order(items)
+    compact = [
+        {
+            "id": item["id"],
+            "title": item.get("title") or "",
+            "body": (item.get("body") or "")[:500],
+            "frequency": item.get("frequency") or "daily",
+            "checked_today": bool(item.get("checked_today")),
+            "current_sort_order": int(item.get("sort_order") or 0),
+        }
+        for item in items
+    ]
+    prompt = (
+        "Order Sooyoung Moon's recurring Kanban routines by the order they should be shown and attempted.\n"
+        "Return every supplied id exactly once. This is ordering WITHIN each UI frequency group; daily and weekly remain visually separate.\n\n"
+        "Evidence hierarchy:\n"
+        "1. Health, sleep, family/relationship stability, safety, hard external commitments.\n"
+        "2. Explicit career goal: overseas big-tech readiness, English technical communication, portfolio/interview assets.\n"
+        "3. Automation, reusable systems, and learning that compounds or reduces repeated toil.\n"
+        "4. Administrative meeting preparation and routine chores, unless deadline/impact makes them urgent.\n"
+        "Prefer a sustainable routine over optimizing everything into obligation. Do not rank only by frequency or creation time.\n"
+        "Use Jyotish only as a secondary planning signal, never fate: Sagittarius Lagna favors overseas/learning; Capricorn stellium favors durable systems; Cancer Moon/Ashlesha favors health, relationships, boundaries and hidden-complexity resolution; Saturn Aquarius favors technology/platform leverage; Venus/Jupiter period moderately supports language, partnership, career assets and quality of life.\n"
+        "Return ONLY JSON: {\"ordered_ids\":[...],\"reason\":\"짧은 한국어 설명\"}.\n\n"
+        "ROUTINES:\n" + json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
+    )
+    supplied = [item["id"] for item in items]
+
     try:
         from agent.auxiliary_client import get_text_auxiliary_client
 
-        client, model = get_text_auxiliary_client("kanban_priority")
-        if client is None or not model:
-            return RoutineRankDecision(fallback, "우선순위 LLM unavailable; practical fallback", "heuristic")
-        compact = [
-            {
-                "id": item["id"],
-                "title": item.get("title") or "",
-                "body": (item.get("body") or "")[:500],
-                "frequency": item.get("frequency") or "daily",
-                "checked_today": bool(item.get("checked_today")),
-                "current_sort_order": int(item.get("sort_order") or 0),
-            }
-            for item in items
-        ]
-        prompt = (
-            "Order Sooyoung Moon's recurring Kanban routines by the order they should be shown and attempted.\n"
-            "Return every supplied id exactly once. This is ordering WITHIN each UI frequency group; daily and weekly remain visually separate.\n\n"
-            "Evidence hierarchy:\n"
-            "1. Health, sleep, family/relationship stability, safety, hard external commitments.\n"
-            "2. Explicit career goal: overseas big-tech readiness, English technical communication, portfolio/interview assets.\n"
-            "3. Automation, reusable systems, and learning that compounds or reduces repeated toil.\n"
-            "4. Administrative meeting preparation and routine chores, unless deadline/impact makes them urgent.\n"
-            "Prefer a sustainable routine over optimizing everything into obligation. Do not rank only by frequency or creation time.\n"
-            "Use Jyotish only as a secondary planning signal, never fate: Sagittarius Lagna favors overseas/learning; Capricorn stellium favors durable systems; Cancer Moon/Ashlesha favors health, relationships, boundaries and hidden-complexity resolution; Saturn Aquarius favors technology/platform leverage; Venus/Jupiter period moderately supports language, partnership, career assets and quality of life.\n"
-            "Return ONLY JSON: {\"ordered_ids\":[...],\"reason\":\"짧은 한국어 설명\"}.\n\n"
-            "ROUTINES:\n" + json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
+        failures: list[str] = []
+        attempts = (
+            ("kanban_priority", "auxiliary"),
+            ("kanban_priority_fallback", "auxiliary-fallback"),
         )
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0,
-            max_tokens=2000,
-        )
-        raw = resp.choices[0].message.content if resp and resp.choices else ""
-        obj = _extract_json_object(raw)
-        supplied = [item["id"] for item in items]
-        ordered = obj.get("ordered_ids") if obj else None
-        if not isinstance(ordered, list):
-            return RoutineRankDecision(fallback, "LLM 응답 파싱 실패; practical fallback", "heuristic-fallback", model)
-        ordered = [str(value) for value in ordered]
-        if len(ordered) != len(supplied) or set(ordered) != set(supplied):
-            return RoutineRankDecision(fallback, "LLM이 루틴 ID를 누락/추가함; practical fallback", "heuristic-fallback", model)
+        for task, source in attempts:
+            client, model = get_text_auxiliary_client(task)
+            if client is None or not model:
+                failures.append(f"{task}: unavailable")
+                continue
+            try:
+                resp = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.0,
+                    max_tokens=2000,
+                )
+                raw = resp.choices[0].message.content if resp and resp.choices else ""
+                obj = _extract_json_object(raw)
+                ordered = obj.get("ordered_ids") if obj else None
+                if not isinstance(ordered, list):
+                    failures.append(f"{model}: JSON parse failed")
+                    continue
+                ordered = [str(value) for value in ordered]
+                if len(ordered) != len(supplied) or set(ordered) != set(supplied):
+                    failures.append(f"{model}: invalid routine ids")
+                    continue
+                reason = obj.get("reason") if obj else None
+                return RoutineRankDecision(
+                    ordered,
+                    str(reason or "사용자 가치 기준으로 루틴을 정렬했습니다.")[:500],
+                    source,
+                    model,
+                )
+            except Exception as exc:
+                logger.info("routine priority attempt %s failed: %s", task, exc)
+                failures.append(f"{model}: {type(exc).__name__}")
+
         return RoutineRankDecision(
-            ordered,
-            str(obj.get("reason") or "사용자 가치 기준으로 루틴을 정렬했습니다.")[:500],
-            "auxiliary",
-            model,
+            fallback,
+            "; ".join(failures) + "; practical fallback",
+            "heuristic-fallback",
         )
     except Exception as exc:
         logger.info("routine priority LLM unavailable: %s", exc)

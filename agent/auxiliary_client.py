@@ -945,7 +945,25 @@ class _CodexCompletionsAdapter:
             _host_src = str(getattr(self._client, "base_url", "") or "")
             _is_xai = base_url_host_matches(_host_src, "x.ai") or base_url_host_matches(_host_src, "api.x.ai")
             _is_github = base_url_host_matches(_host_src, "githubcopilot.com")
-            if not _is_xai and not _is_github and "prompt_cache_key" not in resp_kwargs:
+            _supports_cache_key = False
+            try:
+                import inspect
+
+                _create_params = inspect.signature(self._client.responses.create).parameters.values()
+                _supports_cache_key = any(
+                    param.name == "prompt_cache_key" or param.kind == inspect.Parameter.VAR_KEYWORD
+                    for param in _create_params
+                )
+            except (TypeError, ValueError):
+                # Opaque/proxied callables cannot be checked reliably; preserve
+                # the established cache-key behavior for those clients.
+                _supports_cache_key = True
+            if (
+                not _is_xai
+                and not _is_github
+                and _supports_cache_key
+                and "prompt_cache_key" not in resp_kwargs
+            ):
                 _cache_key = _content_cache_key(instructions, resp_kwargs.get("tools"))
                 if _cache_key:
                     resp_kwargs["prompt_cache_key"] = _cache_key

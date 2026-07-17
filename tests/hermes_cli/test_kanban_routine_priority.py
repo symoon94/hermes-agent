@@ -56,6 +56,30 @@ def test_hallucinated_routine_id_uses_practical_fallback(monkeypatch):
     assert decision.source == "heuristic-fallback"
 
 
+def test_invalid_primary_json_retries_with_gpt_fallback(monkeypatch):
+    solar = _Client("Exercise, English speaking, Reading")
+    gpt = _Client('{"ordered_ids":["r_ex","r_speak","r_read"],"reason":"GPT fallback 정렬"}')
+    requested_tasks = []
+
+    def get_client(task):
+        requested_tasks.append(task)
+        if task == "kanban_priority":
+            return solar, "solar-open2"
+        if task == "kanban_priority_fallback":
+            return gpt, "gpt-5.5"
+        raise AssertionError(f"unexpected auxiliary task: {task}")
+
+    monkeypatch.setattr("agent.auxiliary_client.get_text_auxiliary_client", get_client)
+
+    decision = krp.decide_routine_order(_items())
+
+    assert requested_tasks == ["kanban_priority", "kanban_priority_fallback"]
+    assert decision.ordered_ids == ["r_ex", "r_speak", "r_read"]
+    assert decision.reason == "GPT fallback 정렬"
+    assert decision.source == "auxiliary-fallback"
+    assert decision.model == "gpt-5.5"
+
+
 def test_rerank_persists_sort_order(monkeypatch, kanban_home):
     with kb.connect_closing() as conn:
         read = kb.create_routine_item(conn, title="Reading", frequency="daily")
