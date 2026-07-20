@@ -38,6 +38,13 @@ def _fallback_order(items: list[dict[str, Any]]) -> list[str]:
         text = f"{item.get('title') or ''} {item.get('body') or ''}".lower()
         if any(k in text for k in ("exercise", "운동", "health", "건강", "sleep", "수면")):
             tier = 1
+        elif any(k in text for k in (
+            "token cost", "token-cost", "토큰 비용", "model routing", "모델 라우팅",
+            "agent", "에이전트", "harness", "하네스", "evaluation", "평가",
+            "agent memory", "에이전트 메모리", "guardrail", "가드레일",
+            "ai adoption", "ai 도입", "critical thinking", "비판적 사고",
+        )):
+            tier = 2
         elif any(k in text for k in ("speaking", "writing", "english", "영어", "interview", "면접")):
             tier = 2
         elif any(k in text for k in ("reading", "learn", "study", "익히", "학습", "기술")):
@@ -74,9 +81,12 @@ def decide_routine_order(items: list[dict[str, Any]]) -> RoutineRankDecision:
         "Return every supplied id exactly once. This is ordering WITHIN each UI frequency group; daily and weekly remain visually separate.\n\n"
         "Evidence hierarchy:\n"
         "1. Health, sleep, family/relationship stability, safety, hard external commitments.\n"
-        "2. Explicit career goal: overseas big-tech readiness, English technical communication, portfolio/interview assets.\n"
-        "3. Automation, reusable systems, and learning that compounds or reduces repeated toil.\n"
-        "4. Administrative meeting preparation and routine chores, unless deadline/impact makes them urgent.\n"
+        "2. North-star future alignment: AI-first, evaluation-driven, security-conscious, human-centered work. The expected future moves many roles toward meta-level orchestration of AI.\n"
+        "3. Build compounding expertise in token economics, model/agent architecture, harness/evaluation, memory, guardrails, security and production quality; make AI beneficial and easy to apply through reusable enablement.\n"
+        "4. Strengthen rapid critical judgment of AI output and human communication, trust, empathy, facilitation and accountability.\n"
+        "5. Explicit career goal: overseas big-tech readiness, English technical communication, portfolio/interview assets.\n"
+        "6. Automation, reusable systems, and learning that compounds or reduces repeated toil.\n"
+        "7. Administrative meeting preparation and routine chores, unless deadline/impact makes them urgent.\n"
         "Prefer a sustainable routine over optimizing everything into obligation. Do not rank only by frequency or creation time.\n"
         "Use Jyotish only as a secondary planning signal, never fate: Sagittarius Lagna favors overseas/learning; Capricorn stellium favors durable systems; Cancer Moon/Ashlesha favors health, relationships, boundaries and hidden-complexity resolution; Saturn Aquarius favors technology/platform leverage; Venus/Jupiter period moderately supports language, partnership, career assets and quality of life.\n"
         "Return ONLY JSON: {\"ordered_ids\":[...],\"reason\":\"짧은 한국어 설명\"}.\n\n"

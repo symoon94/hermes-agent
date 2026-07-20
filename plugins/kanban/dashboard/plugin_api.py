@@ -408,6 +408,9 @@ def get_board(
     board = _resolve_board(board)
     conn = _conn(board=board)
     try:
+        from hermes_cli import kanban_priority
+
+        kanban_priority.refresh_due_urgency(conn)
         tasks = kanban_db.list_tasks(
             conn,
             tenant=tenant,
@@ -1023,6 +1026,9 @@ def update_task(task_id: str, payload: UpdateTaskBody, board: Optional[str] = Qu
                     "VALUES (?, 'due_date_changed', ?, ?)",
                     (task_id, json.dumps({"due_at": due_at if due_at > 0 else None}), int(time.time())),
                 )
+            from hermes_cli import kanban_priority
+
+            kanban_priority.reprioritize_due_task(conn, task_id)
 
         # --- title / body -------------------------------------------------
         if payload.title is not None or payload.body is not None:

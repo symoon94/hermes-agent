@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -62,6 +63,39 @@ TIER3_HINTS = (
     "학습", "리서치", "정리", "가이드", "guide", "faq", "문서", "book", "책",
 )
 TIER4_HINTS = ("거절", "reject", "defer", "won't do", "wont do", "나중에", "someday")
+FUTURE_ALIGNMENT_HINTS = (
+    "token economics", "token cost", "token-cost", "토큰 비용", "토큰 가성비",
+    "model routing", "모델 라우팅", "agent system", "에이전트 시스템",
+    "evaluation harness", "평가 하네스", "agent harness", "에이전트 하네스",
+    "agent memory", "에이전트 메모리", "guardrail", "가드레일",
+    "ai adoption", "ai 도입", "ai enablement", "production ai", "프로덕션 ai",
+    "human-in-the-loop", "critical thinking", "비판적 사고",
+    "easy-to-apply ai", "beneficial ai",
+)
+
+
+def due_urgency(due_at: Optional[int], *, now: Optional[int] = None) -> tuple[str, int]:
+    """Return a stable urgency label and bucket (lower means more urgent)."""
+    if due_at is None or int(due_at) <= 0:
+        return "none", 3
+    remaining = int(due_at) - int(time.time() if now is None else now)
+    if remaining <= 24 * 60 * 60:
+        return "critical", 0
+    if remaining <= 3 * 24 * 60 * 60:
+        return "near", 1
+    if remaining <= 7 * 24 * 60 * 60:
+        return "soon", 2
+    return "later", 3
+
+
+def _urgency_priority_key(tier: int, due_at: Optional[int], *, now: int) -> tuple[int, int, int]:
+    label, bucket = due_urgency(due_at, now=now)
+    effective_tier = tier
+    if tier < 4 and label in {"critical", "near"}:
+        effective_tier = max(1, tier - 1)
+    # Original importance breaks ties before urgency, so a rushed low-value
+    # task cannot leapfrog an intrinsically higher-tier task.
+    return effective_tier, tier, bucket
 
 
 @dataclass
@@ -91,6 +125,8 @@ def _heuristic_tier_realm(title: str, body: Optional[str], tenant: Optional[str]
         tier = 4
     elif _has_any(text, TIER1_HINTS):
         tier = 1
+    elif _has_any(text, FUTURE_ALIGNMENT_HINTS):
+        tier = 2
     elif upstageish and _has_any(text, TIER2_HINTS):
         tier = 2
     elif privateish or _has_any(text, TIER3_HINTS):
@@ -119,7 +155,7 @@ def _extract_json_object(text: str) -> Optional[dict[str, Any]]:
 def _existing_ranked(conn: Any, *, limit: int = 120) -> list[dict[str, Any]]:
     rows = conn.execute(
         """
-        SELECT id, title, body, status, assignee, priority, created_at
+        SELECT id, title, body, status, assignee, priority, created_at, due_at
           FROM tasks
          WHERE status != 'archived'
            AND COALESCE(priority, 0) > 0
@@ -138,6 +174,7 @@ def _existing_ranked(conn: Any, *, limit: int = 120) -> list[dict[str, Any]]:
             "assignee": row["assignee"],
             "title": row["title"],
             "body_snippet": re.sub(r"\s+", " ", body).strip()[:240],
+            "due_at": int(row["due_at"]) if row["due_at"] is not None else None,
         })
     return out
 
@@ -162,27 +199,163 @@ def _priority_before(conn: Any, task_id: Optional[str]) -> Optional[int]:
     return p if p > 0 else None
 
 
-def _fallback_decision(conn: Any, *, title: str, body: Optional[str], tenant: Optional[str]) -> PriorityDecision:
+def _fallback_decision(
+    conn: Any,
+    *,
+    title: str,
+    body: Optional[str],
+    tenant: Optional[str],
+    due_at: Optional[int] = None,
+    now: Optional[int] = None,
+    exclude_task_id: Optional[str] = None,
+) -> PriorityDecision:
     tier, realm = _heuristic_tier_realm(title, body, tenant)
+    now_ts = int(time.time() if now is None else now)
+    urgency_label, _ = due_urgency(due_at, now=now_ts)
+    priority_key = _urgency_priority_key(tier, due_at, now=now_ts)
+    effective_tier = priority_key[0]
     existing = _existing_ranked(conn, limit=500)
-    # Approximate Luna's tier ordering. We infer tiers for existing items from
-    # text and insert after the last item with a strictly better/equal tier.
-    insert_after_priority = 0
+    if exclude_task_id:
+        existing = [item for item in existing if item.get("id") != exclude_task_id]
+    # Approximate Luna's tier ordering. Count every existing card with a
+    # strictly better/equal guarded key so mixed legacy ordering cannot let a
+    # lower-value urgent card jump an intrinsically higher-tier card.
+    better_or_equal_count = 0
     for item in existing:
         etier, _ = _heuristic_tier_realm(item.get("title") or "", item.get("body_snippet") or "", None)
-        if etier <= tier:
-            insert_after_priority = max(insert_after_priority, int(item.get("priority") or 0))
-    priority = insert_after_priority + 1 if insert_after_priority else 1
+        existing_key = _urgency_priority_key(etier, item.get("due_at"), now=now_ts)
+        if existing_key <= priority_key:
+            better_or_equal_count += 1
+    priority = better_or_equal_count + 1
     return PriorityDecision(
         priority=priority,
-        reason=f"heuristic Luna tier T{tier}; inserted after existing tasks with tier <= T{tier}",
-        tier=tier,
+        reason=(
+            f"heuristic Luna tier T{tier}, due urgency {urgency_label}; "
+            f"effective tier T{effective_tier} with intrinsic-tier guardrail"
+        ),
+        tier=effective_tier,
         realm=realm,
         source="heuristic",
     )
 
 
-def decide_priority(conn: Any, *, title: str, body: Optional[str], tenant: Optional[str] = None) -> PriorityDecision:
+def reprioritize_due_task(
+    conn: Any,
+    task_id: str,
+    *,
+    now: Optional[int] = None,
+) -> Optional[PriorityDecision]:
+    """Move an existing card using deterministic, importance-guarded urgency."""
+    row = conn.execute(
+        "SELECT id, title, body, tenant, due_at FROM tasks WHERE id = ?",
+        (task_id,),
+    ).fetchone()
+    if row is None:
+        return None
+
+    due_at = int(row["due_at"]) if row["due_at"] is not None else None
+    decision = _fallback_decision(
+        conn,
+        title=row["title"],
+        body=row["body"],
+        tenant=row["tenant"],
+        due_at=due_at,
+        now=now,
+        exclude_task_id=task_id,
+    )
+    ranked_ids = [
+        item["id"]
+        for item in _existing_ranked(conn, limit=5000)
+        if item["id"] != task_id
+    ]
+    target_index = max(0, min(len(ranked_ids), int(decision.priority) - 1))
+    ranked_ids.insert(target_index, task_id)
+
+    from hermes_cli import kanban_db
+
+    event_time = int(time.time() if now is None else now)
+    urgency_label, _ = due_urgency(due_at, now=event_time)
+    with kanban_db.write_txn(conn):
+        for priority, ranked_id in enumerate(ranked_ids, start=1):
+            conn.execute(
+                "UPDATE tasks SET priority = ? WHERE id = ?",
+                (priority, ranked_id),
+            )
+        conn.execute(
+            "INSERT INTO task_events (task_id, kind, payload, created_at) "
+            "VALUES (?, 'due_urgency_applied', ?, ?)",
+            (
+                task_id,
+                json.dumps(
+                    {
+                        "priority": target_index + 1,
+                        "tier": decision.tier,
+                        "reason": decision.reason,
+                        "urgency": urgency_label,
+                    },
+                    ensure_ascii=False,
+                ),
+                event_time,
+            ),
+        )
+    return PriorityDecision(
+        priority=target_index + 1,
+        reason=decision.reason,
+        tier=decision.tier,
+        realm=decision.realm,
+        source="due-urgency",
+    )
+
+
+def refresh_due_urgency(conn: Any, *, now: Optional[int] = None) -> int:
+    """Re-rank cards once when their due date enters a more urgent bucket."""
+    now_ts = int(time.time() if now is None else now)
+    rows = conn.execute(
+        """
+        SELECT id, due_at
+          FROM tasks
+         WHERE due_at IS NOT NULL
+           AND COALESCE(priority, 0) > 0
+           AND status NOT IN ('done', 'archived')
+         ORDER BY priority ASC, created_at ASC
+        """
+    ).fetchall()
+    changed = 0
+    for row in rows:
+        urgency_label, _ = due_urgency(row["due_at"], now=now_ts)
+        if urgency_label in {"none", "later"}:
+            continue
+        latest = conn.execute(
+            """
+            SELECT payload
+              FROM task_events
+             WHERE task_id = ? AND kind = 'due_urgency_applied'
+             ORDER BY id DESC
+             LIMIT 1
+            """,
+            (row["id"],),
+        ).fetchone()
+        previous_label = None
+        if latest is not None and latest["payload"]:
+            try:
+                previous_label = json.loads(latest["payload"]).get("urgency")
+            except (TypeError, ValueError, AttributeError):
+                previous_label = None
+        if previous_label == urgency_label:
+            continue
+        if reprioritize_due_task(conn, row["id"], now=now_ts) is not None:
+            changed += 1
+    return changed
+
+
+def decide_priority(
+    conn: Any,
+    *,
+    title: str,
+    body: Optional[str],
+    tenant: Optional[str] = None,
+    due_at: Optional[int] = None,
+) -> PriorityDecision:
     """Return the master-list insertion rank for a new task.
 
     The returned priority may collide with existing rows; caller should shift
@@ -199,13 +372,26 @@ def decide_priority(conn: Any, *, title: str, body: Optional[str], tenant: Optio
             source="empty-board",
         )
 
-    fallback = _fallback_decision(conn, title=title, body=body, tenant=tenant)
+    fallback = _fallback_decision(
+        conn, title=title, body=body, tenant=tenant, due_at=due_at,
+    )
     try:
         from agent.auxiliary_client import get_text_auxiliary_client
 
         client, aux_model = get_text_auxiliary_client("kanban_priority")
         if client is None or not aux_model:
             return fallback
+        now_ts = int(time.time())
+        prompt_existing = []
+        for item in existing:
+            enriched = dict(item)
+            label, _ = due_urgency(item.get("due_at"), now=now_ts)
+            enriched["due_urgency"] = label
+            enriched["due_in_hours"] = (
+                round((int(item["due_at"]) - now_ts) / 3600, 1)
+                if item.get("due_at") is not None else None
+            )
+            prompt_existing.append(enriched)
         prompt = (
             "You are inserting a new Hermes kanban card into Sooyoung Moon's master priority list.\n"
             "Use Sooyoung/Luna priority values, not FIFO and not arbitrary numeric score:\n"
@@ -213,6 +399,18 @@ def decide_priority(conn: Any, *, title: str, body: Optional[str], tenant: Optio
             "- T2: career/startup leverage, product lifecycle, team/process/system design, release/migration work.\n"
             "- T3: learning, documentation, knowledge transfer, personal growth/routines.\n"
             "- T4: reject/defer/someday candidates.\n"
+            "Structured due-date urgency rules:\n"
+            "- overdue or due within 24 hours = critical; within 3 days = near; within 7 days = soon.\n"
+            "- Urgency may promote by at most one tier, and T4 defer/reject work is never promoted.\n"
+            "- Preserve the intrinsic-importance guardrail: a rushed lower-value task must not leapfrog an intrinsically higher-tier task.\n"
+            "- Within the same intrinsic importance, earlier deadlines, blocked people, and hard external commitments rank first.\n"
+            "North-star future alignment — AI-first, evaluation-driven, security-conscious, human-centered:\n"
+            "- The expected future is that every domain adopts AI and many jobs become meta-level orchestration: people specify, route, evaluate, govern, and take responsibility for AI work.\n"
+            "- Strongly value compounding expertise in token economics, model and agent architecture, harness and evaluation, memory, guardrails, security, observability, and production quality.\n"
+            "- Strongly value work that makes AI beneficial and easy to apply where it is absent or difficult to adopt, especially reusable enablement rather than one-off demos.\n"
+            "- Strongly value rapid comprehension plus critical judgment of AI output, and human strengths such as communication, trust, empathy, facilitation, and accountability.\n"
+            "- Health, family, stability, relationships, and recovery are enabling foundations for this future, not misaligned distractions.\n"
+            "- Do not force a fake AI connection onto every chore: rank work by its real direct contribution, enabling contribution, hard obligation, or opportunity cost.\n"
             "Current personal value updates to weigh explicitly:\n"
             "- Strong desire to enjoy life, not optimize everything into obligation. Tasks that preserve energy, relationships, health, or daily enjoyment can outrank pure productivity chores.\n"
             "- Strong desire to work at an overseas big-tech company at least once. Tasks that build credible global-big-tech/FDE/product-engineering readiness, English communication, resume/portfolio, interview loops, or high-signal career options should rank higher.\n"
@@ -229,9 +427,13 @@ def decide_priority(conn: Any, *, title: str, body: Optional[str], tenant: Optio
             "Within a tier compare actual impact, deadlines, dependencies, reversibility, and whether the task unblocks other people.\n"
             "Return ONLY JSON with keys: insert_before_id (task id string or null), tier (1-4), realm ('Upstage'|'Private'|null), reason (short Korean).\n"
             "If the new card belongs at the end of the ranked list, use insert_before_id:null.\n\n"
-            f"NEW CARD:\nTitle: {title}\nTenant: {tenant or ''}\nBody:\n{(body or '')[:2000]}\n\n"
+            f"Current unix time: {now_ts}\n"
+            f"NEW CARD:\nTitle: {title}\nTenant: {tenant or ''}\n"
+            f"Due at unix: {int(due_at) if due_at is not None else 'null'}\n"
+            f"Due urgency: {due_urgency(due_at, now=now_ts)[0]}\n"
+            f"Body:\n{(body or '')[:2000]}\n\n"
             "CURRENT MASTER PRIORITY LIST (top first):\n"
-            + json.dumps(existing, ensure_ascii=False, indent=2)
+            + json.dumps(prompt_existing, ensure_ascii=False, indent=2)
         )
         resp = client.chat.completions.create(
             model=aux_model,

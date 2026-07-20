@@ -25,7 +25,12 @@ class _Client:
         self.chat = SimpleNamespace(completions=self)
 
     def create(self, **kwargs):
-        assert "family/relationship stability" in kwargs["messages"][0]["content"]
+        prompt = kwargs["messages"][0]["content"]
+        assert "family/relationship stability" in prompt
+        assert "meta-level orchestration" in prompt
+        assert "beneficial and easy to apply" in prompt
+        assert "token economics" in prompt
+        assert "human communication" in prompt
         return SimpleNamespace(
             choices=[SimpleNamespace(message=SimpleNamespace(content=self.content))]
         )
@@ -98,3 +103,12 @@ def test_rerank_persists_sort_order(monkeypatch, kanban_home):
 
 def test_fallback_prioritizes_health_then_english_then_learning():
     assert krp._fallback_order(_items()) == ["r_ex", "r_speak", "r_read"]
+
+
+def test_fallback_prioritizes_future_aligned_ai_capability_over_generic_learning():
+    items = [
+        {"id": "r_read", "title": "Reading", "sort_order": 1},
+        {"id": "r_ai", "title": "Improve AI evaluation harness and agent memory", "sort_order": 2},
+    ]
+
+    assert krp._fallback_order(items) == ["r_ai", "r_read"]

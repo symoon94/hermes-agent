@@ -2631,6 +2631,7 @@ def create_task(
             title=title.strip(),
             body=body,
             tenant=tenant,
+            due_at=due_at,
         )
         insert_priority = int(auto_priority_decision.priority)
     else:
@@ -2785,6 +2786,21 @@ def create_task(
                             "reason": auto_priority_decision.reason,
                         },
                     )
+                    if due_at is not None:
+                        from hermes_cli import kanban_priority
+
+                        urgency_label, _ = kanban_priority.due_urgency(due_at)
+                        _append_event(
+                            conn,
+                            task_id,
+                            "due_urgency_applied",
+                            {
+                                "priority": insert_priority,
+                                "tier": auto_priority_decision.tier,
+                                "reason": auto_priority_decision.reason,
+                                "urgency": urgency_label,
+                            },
+                        )
             return task_id
         except sqlite3.IntegrityError:
             if attempt == 1:

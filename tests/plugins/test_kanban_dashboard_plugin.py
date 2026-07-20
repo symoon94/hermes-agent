@@ -295,6 +295,50 @@ def test_task_detail_404_on_unknown(client):
     assert r.status_code == 404
 
 
+def test_board_refreshes_due_urgency(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "hermes_cli.kanban_priority.refresh_due_urgency",
+        lambda conn: calls.append(conn) or 0,
+    )
+
+    response = client.get("/api/plugins/kanban/board")
+
+    assert response.status_code == 200
+    assert len(calls) == 1
+
+
+def test_patch_due_date_reprioritizes_by_urgency(client):
+    import time
+
+    security = client.post(
+        "/api/plugins/kanban/tasks",
+        json={"title": "security incident", "priority": 1},
+    ).json()["task"]
+    reading = client.post(
+        "/api/plugins/kanban/tasks",
+        json={"title": "read architecture book", "priority": 2},
+    ).json()["task"]
+    studying = client.post(
+        "/api/plugins/kanban/tasks",
+        json={"title": "study evaluation methods", "priority": 3},
+    ).json()["task"]
+
+    response = client.patch(
+        f"/api/plugins/kanban/tasks/{studying['id']}",
+        json={"due_at": int(time.time()) + 12 * 60 * 60},
+    )
+
+    assert response.status_code == 200
+    board = client.get("/api/plugins/kanban/board").json()
+    column = next(
+        column for column in board["columns"]
+        if any(task["id"] == security["id"] for task in column["tasks"])
+    )
+    ids = [task["id"] for task in column["tasks"]]
+    assert ids.index(security["id"]) < ids.index(studying["id"]) < ids.index(reading["id"])
+
+
 # ---------------------------------------------------------------------------
 # PATCH /tasks/:id — status transitions
 # ---------------------------------------------------------------------------

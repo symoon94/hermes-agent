@@ -1601,6 +1601,39 @@ def test_create_task_auto_prioritizes_and_shifts_existing_rows(kanban_home, monk
         assert payload["priority"] == 2
         assert payload["source"] == "test"
 
+
+def test_create_task_passes_due_at_to_auto_priority(kanban_home, monkeypatch):
+    import hermes_cli.kanban_priority as kanban_priority
+
+    captured = {}
+
+    class Decision:
+        priority = 1
+        reason = "deadline-aware"
+        insert_before_id = None
+        tier = 2
+        realm = "Private"
+        source = "test"
+
+    def decide(conn, **kwargs):
+        captured.update(kwargs)
+        return Decision()
+
+    monkeypatch.setattr(kanban_priority, "decide_priority", decide)
+    monkeypatch.setattr(kanban_priority.time, "time", lambda: 1_700_000_000)
+    with kb.connect() as conn:
+        task_id = kb.create_task(
+            conn,
+            title="submit application",
+            due_at=1_700_000_000 + 12 * 60 * 60,
+        )
+        events = kb.list_events(conn, task_id)
+
+    assert captured["due_at"] == 1_700_000_000 + 12 * 60 * 60
+    due_events = [event for event in events if event.kind == "due_urgency_applied"]
+    assert due_events[-1].payload["urgency"] == "critical"
+
+
 def test_delete_task_removes_task_and_cascades(kanban_home):
     with kb.connect() as conn:
         t = kb.create_task(conn, title="to-delete", assignee="alice")
